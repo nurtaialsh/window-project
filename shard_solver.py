@@ -42,7 +42,8 @@ TILE = 48       # what the network sees
 KMIN, KMAX = 24, 48
 
 
-def load_image(path, size=SIZE):
+def load_image(path, size=None):
+    size = size or SIZE
     im = Image.open(path).convert("RGB")
     return np.array(im.resize((size, size), Image.BICUBIC))
 
@@ -54,9 +55,10 @@ def list_images(folder):
 
 # ───────────────────────── data ─────────────────────────
 
-def crack_pool(n=2000, path=f"checkpoints/cracks_{SIZE}_{KMIN}-{KMAX}.npy"):
+def crack_pool(n=2000, path=None):
     """Crack layouts don't depend on the picture, so make a pool once and reuse it
     (with 8 flips/transposes each). Drawing them fresh every step was the bottleneck."""
+    path = path or f"checkpoints/cracks_{SIZE}_{KMIN}-{KMAX}.npy"
     if os.path.exists(path):
         pool = np.load(path)
         if len(pool) >= n:
@@ -350,6 +352,7 @@ def evaluate(a):
 
 
 def main():
+    global SIZE, KMIN, KMAX, CROP
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("train")
@@ -372,7 +375,12 @@ def main():
     e.add_argument("--trials", type=int, default=3)
     for p in (t, d, e):
         p.add_argument("--ckpt", default="checkpoints/shards.pt")
+        p.add_argument("--size", type=int, default=SIZE, help="window is resized to this")
+        p.add_argument("--kmin", type=int, default=KMIN, help="fewest shards")
+        p.add_argument("--kmax", type=int, default=KMAX, help="most shards")
+        p.add_argument("--crop", type=int, default=CROP, help="shard crop size at full res")
     a = ap.parse_args()
+    SIZE, KMIN, KMAX, CROP = a.size, a.kmin, a.kmax, a.crop
     os.makedirs("checkpoints", exist_ok=True)
     {"train": train, "demo": demo, "eval": evaluate}[a.cmd](a)
 
