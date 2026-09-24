@@ -1,0 +1,6 @@
+torch
+numpy
+scipy
+pillow
+scikit-image
+requests

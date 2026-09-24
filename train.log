@@ -1,0 +1,22 @@
+1058 training windows, 55 held-out windows
+ep   1 [  2.7 min] pos 0.2007 rot 0.897 | held-out: shards placed 22.4%, perfect windows 0%, rot median 53°
+ep   2 [  5.4 min] pos 0.1574 rot 0.607 | held-out: shards placed 43.9%, perfect windows 1%, rot median 40°
+ep   3 [  8.1 min] pos 0.1149 rot 0.494 | held-out: shards placed 58.3%, perfect windows 5%, rot median 29°
+ep   4 [ 10.9 min] pos 0.0969 rot 0.422 | held-out: shards placed 62.1%, perfect windows 8%, rot median 25°
+ep   5 [ 13.6 min] pos 0.0859 rot 0.365 | held-out: shards placed 64.9%, perfect windows 11%, rot median 19°
+ep   6 [ 16.3 min] pos 0.0789 rot 0.317 | held-out: shards placed 69.6%, perfect windows 12%, rot median 17°
+ep   7 [ 19.2 min] pos 0.0709 rot 0.280 | held-out: shards placed 73.7%, perfect windows 21%, rot median 17°
+ep   8 [ 22.4 min] pos 0.0650 rot 0.249 | held-out: shards placed 75.4%, perfect windows 20%, rot median 13°
+ep   9 [ 25.1 min] pos 0.0613 rot 0.229 | held-out: shards placed 75.2%, perfect windows 24%, rot median 11°
+ep  10 [ 27.9 min] pos 0.0559 rot 0.199 | held-out: shards placed 78.4%, perfect windows 31%, rot median 11°
+ep  11 [ 30.5 min] pos 0.0516 rot 0.175 | held-out: shards placed 79.3%, perfect windows 30%, rot median 10°
+ep  12 [ 33.1 min] pos 0.0460 rot 0.145 | held-out: shards placed 84.3%, perfect windows 34%, rot median 10°
+ep  13 [ 35.7 min] pos 0.0440 rot 0.136 | held-out: shards placed 84.9%, perfect windows 41%, rot median 8°
+ep  14 [ 38.4 min] pos 0.0407 rot 0.118 | held-out: shards placed 85.0%, perfect windows 40%, rot median 9°
+ep  15 [ 41.1 min] pos 0.0378 rot 0.107 | held-out: shards placed 87.1%, perfect windows 48%, rot median 9°
+ep  16 [ 43.8 min] pos 0.0372 rot 0.095 | held-out: shards placed 87.3%, perfect windows 54%, rot median 7°
+ep  17 [ 46.6 min] pos 0.0350 rot 0.085 | held-out: shards placed 86.6%, perfect windows 44%, rot median 7°
+ep  18 [ 49.3 min] pos 0.0341 rot 0.080 | held-out: shards placed 88.4%, perfect windows 50%, rot median 6°
+ep  19 [ 52.1 min] pos 0.0327 rot 0.073 | held-out: shards placed 88.4%, perfect windows 50%, rot median 7°
+time budget reached
+best held-out shard accuracy 88.4%, saved checkpoints/shards.pt

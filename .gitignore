@@ -1,0 +1,6 @@
+data/
+__pycache__/
+*.zip
+checkpoints/*.npy
+checkpoints/shards.pt
+checkpoints/shards_v1_small.pt
