@@ -25,6 +25,18 @@ learning to suggest where such fragments originally belonged.
     python shard_solver.py demo  --image path/to/window.jpg --out result.png
     python shard_solver.py eval  --images data/heldout
 
+## Training on real windows (NVIDIA GPU)
+    pip install torch --index-url https://download.pytorch.org/whl/cu124   # CUDA build of torch
+    pip install numpy scipy pillow scikit-image requests
+    python -c "import torch; print(torch.cuda.is_available())"             # must print True
+    python split_panes.py --images data/real --out data/panes --thresh 30 --max-dark 0.45
+    copy checkpoints\model_v1_synthetic_10-16shards.pt checkpoints\shards.pt   # start from v1
+    python shard_solver.py train --images data/panes --resume --epochs 40 --lr 5e-4 --workers 4 --size 192 --kmin 10 --kmax 16 --crop 104
+
+`split_panes.py` cuts multi-light windows into single panes along the dark stonework.
+Training uses the GPU automatically when there is one (`--device cpu` to force CPU).
+Pass the same `--size/--kmin/--kmax/--crop` to `demo` and `eval` as you trained with.
+
 ## Status
 - `checkpoints/model_v1_synthetic_10-16shards.pt`: trained on synthetic windows
   (`make_windows.py`), 10–16 shards, 192 px. On 55 held-out synthetic windows:

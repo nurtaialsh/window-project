@@ -88,6 +88,7 @@ class ShatterDataset(Dataset):
     def __init__(self, paths, samples_per_epoch=4000, augment=True):
         self.imgs = [load_image(p) for p in paths]
         self.pool = crack_pool()
+        self.crop = CROP  # kept here: on Windows, workers re-import the module defaults
         self.n = samples_per_epoch
         self.augment = augment
 
@@ -102,7 +103,7 @@ class ShatterDataset(Dataset):
                 img = img[:, ::-1]
             img = np.clip(img * rng.uniform(0.8, 1.2, (1, 1, 3)), 0, 255).astype(np.uint8)
         s = render_shards(np.ascontiguousarray(img), random_cracks(self.pool, rng),
-                          CROP, TILE, rng=rng)
+                          self.crop, TILE, rng=rng)
         return s["tiles"], s["centers"], s["angles"]
 
 
@@ -190,6 +191,7 @@ def angle_err_deg(cs, angles):
 @torch.no_grad()
 def evaluate_model(model, imgs, trials=3, seed=0):
     model.eval()
+    dev = next(model.parameters()).device
     rng = np.random.default_rng(seed)
     ok = tot = perfect = runs = 0
     rot_errs = []
@@ -197,12 +199,12 @@ def evaluate_model(model, imgs, trials=3, seed=0):
         for _ in range(trials):
             k = int(rng.integers(KMIN, KMAX + 1))
             s = render_shards(img, break_image(SIZE, SIZE, k, rng), CROP, TILE, rng=rng)
-            xy, cs = model(torch.from_numpy(s["tiles"])[None],
-                           torch.zeros(1, len(s["tiles"]), dtype=torch.bool))
-            a = assign(xy[0].numpy(), s["centers"])
+            xy, cs = model(torch.from_numpy(s["tiles"])[None].to(dev),
+                           torch.zeros(1, len(s["tiles"]), dtype=torch.bool, device=dev))
+            a = assign(xy[0].cpu().numpy(), s["centers"])
             hits = (a == np.arange(len(a)))
             ok += hits.sum(); tot += len(a); perfect += hits.all(); runs += 1
-            rot_errs += list(angle_err_deg(cs[0].numpy(), s["angles"]))
+            rot_errs += list(angle_err_deg(cs[0].cpu().numpy(), s["angles"]))
     rot_errs = np.array(rot_errs)
     return dict(shard_acc=ok / tot, perfect=perfect / runs,
                 rot_median=float(np.median(rot_errs)),
@@ -211,23 +213,35 @@ def evaluate_model(model, imgs, trials=3, seed=0):
 
 # ───────────────────────── train ─────────────────────────
 
+def device(a):
+    if a.device != "auto":
+        return torch.device(a.device)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def train(a):
     torch.set_num_threads(os.cpu_count())
+    dev = device(a)
     paths = list_images(a.images)
+    # hold out whole source windows: panes from split_panes.py are named <window>__NN.jpg
+    groups = sorted({os.path.basename(p).split("__")[0] for p in paths})
     rng = np.random.default_rng(0)
-    rng.shuffle(paths)
-    n_val = max(4, len(paths) // 20)
-    val_paths, tr_paths = paths[:n_val], paths[n_val:]
-    print(f"{len(tr_paths)} training windows, {len(val_paths)} held-out windows")
+    rng.shuffle(groups)
+    val_groups = set(groups[:min(max(4, len(groups) // 20), len(groups) // 2)])
+    val_paths = [p for p in paths if os.path.basename(p).split("__")[0] in val_groups]
+    tr_paths = [p for p in paths if os.path.basename(p).split("__")[0] not in val_groups]
+    rng.shuffle(val_paths)
+    print(f"{len(tr_paths)} training images, {len(val_paths)} held-out images, on {dev}")
 
     ds = ShatterDataset(tr_paths, a.samples)
     dl = DataLoader(ds, batch_size=a.batch, collate_fn=collate,
-                    num_workers=a.workers, persistent_workers=a.workers > 0)
+                    num_workers=a.workers, persistent_workers=a.workers > 0,
+                    pin_memory=dev.type == "cuda")
     val_imgs = [load_image(p) for p in val_paths[:40]]
 
-    model = ShardSolver()
+    model = ShardSolver().to(dev)
     if a.resume and os.path.exists(a.ckpt):
-        model.load_state_dict(torch.load(a.ckpt, weights_only=True))
+        model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=dev))
         print("resumed from", a.ckpt)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.02)
     total_steps = a.epochs * len(dl)
@@ -240,6 +254,8 @@ def train(a):
         model.train()
         lp = lr_ = 0
         for tiles, centers, angles, pad in dl:
+            tiles, centers, angles, pad = (t.to(dev, non_blocking=True)
+                                           for t in (tiles, centers, angles, pad))
             xy, cs = model(tiles, pad)
             l_pos, l_rot = losses(xy, cs, centers, angles, pad)
             loss = 10 * l_pos + l_rot
@@ -278,7 +294,7 @@ def paste_rgba(canvas, rgba, cx, cy, angle_deg=0.0):
 def demo(a):
     model = ShardSolver()
     model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location="cpu"))
-    model.eval()
+    model.eval()  # one window: CPU is plenty
     rng = np.random.default_rng(a.seed)
     img = load_image(a.image)
     k = a.pieces
@@ -340,8 +356,9 @@ def demo(a):
 
 
 def evaluate(a):
-    model = ShardSolver()
-    model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location="cpu"))
+    dev = device(a)
+    model = ShardSolver().to(dev)
+    model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=dev))
     imgs = [load_image(p) for p in list_images(a.images)[:a.n]]
     m = evaluate_model(model, imgs, trials=a.trials)
     print(f"{len(imgs)} windows x {a.trials} shatterings")
@@ -379,6 +396,7 @@ def main():
         p.add_argument("--kmin", type=int, default=KMIN, help="fewest shards")
         p.add_argument("--kmax", type=int, default=KMAX, help="most shards")
         p.add_argument("--crop", type=int, default=CROP, help="shard crop size at full res")
+        p.add_argument("--device", default="auto", help="auto, cpu or cuda")
     a = ap.parse_args()
     SIZE, KMIN, KMAX, CROP = a.size, a.kmin, a.kmax, a.crop
     os.makedirs("checkpoints", exist_ok=True)
