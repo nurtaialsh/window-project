@@ -115,22 +115,29 @@ def split_image(img: np.ndarray, a):
     return out
 
 
-def main():
+def build_parser():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--images", required=True)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--images")
+    ap.add_argument("--out")
     ap.add_argument("--preview", help="folder for images with the cut boxes drawn on")
-    ap.add_argument("--thresh", type=float, default=40, help="grey level counted as black")
+    ap.add_argument("--thresh", type=float, default=30, help="grey level counted as black")
     ap.add_argument("--cut-frac", type=float, default=0.8,
                     help="a line this dark (fraction of black pixels) is a mullion/transom")
     ap.add_argument("--edge-frac", type=float, default=0.6, help="trim margins darker than this")
-    ap.add_argument("--max-dark", type=float, default=0.3, help="drop panes darker than this")
+    ap.add_argument("--max-dark", type=float, default=0.45, help="drop panes darker than this")
     ap.add_argument("--min-px", type=int, default=48, help="smallest pane side, at 480 px width")
     ap.add_argument("--min-gap", type=int, default=6,
                     help="thinnest dark band (px at 480 width) treated as stonework")
     ap.add_argument("--max-aspect", type=float, default=1.5, help="tile panes longer than this")
     ap.add_argument("--depth", type=int, default=4)
+    return ap
+
+
+def main():
+    ap = build_parser()
     a = ap.parse_args()
+    if not (a.images and a.out):
+        ap.error("--images and --out are required")
 
     os.makedirs(a.out, exist_ok=True)
     if a.preview:

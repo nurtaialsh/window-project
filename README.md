@@ -25,11 +25,20 @@ learning to suggest where such fragments originally belonged.
     python shard_solver.py demo  --image path/to/window.jpg --out result.png
     python shard_solver.py eval  --images data/heldout
 
+## Web app
+    python serve.py            # then open http://localhost:8000
+
+Drop in a window photo; multi-light windows are split into panes you can click. The
+network shatters the pane, and the page animates each shard flying to the hole the
+network chose, turned by the angle it predicted, with the score underneath. It uses
+`checkpoints/model_v2_realpanes_10-16shards.pt` by default (`--ckpt` for another; pass
+`--size/--crop` if that one was trained with different settings).
+
 ## Training on real windows (NVIDIA GPU)
     pip install torch --index-url https://download.pytorch.org/whl/cu124   # CUDA build of torch
     pip install numpy scipy pillow scikit-image requests
     python -c "import torch; print(torch.cuda.is_available())"             # must print True
-    python split_panes.py --images data/real --out data/panes --thresh 30 --max-dark 0.45
+    python split_panes.py --images data/real --out data/panes
     copy checkpoints\model_v2_realpanes_10-16shards.pt checkpoints\shards.pt   # start from v2
     python shard_solver.py train --images data/panes --resume --epochs 40 --lr 5e-4 --workers 4 --size 192 --kmin 10 --kmax 16 --crop 104
 
