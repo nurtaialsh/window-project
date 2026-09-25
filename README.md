@@ -42,5 +42,11 @@ Pass the same `--size/--kmin/--kmax/--crop` to `demo` and `eval` as you trained 
   (`make_windows.py`), 10–16 shards, 192 px. On 55 held-out synthetic windows:
   ~87% of shards placed correctly, ~45% of windows perfect, median rotation error ~7°.
   Lead-following cracks score about the same (86% / 44% / 6°) without retraining.
-- Next: train on real cathedral photos at 512 px with 24–48 shards.
+- `checkpoints/model_v2_realpanes_10-16shards.pt`: v1 fine-tuned for 30 epochs (~9 h on
+  4 CPU cores) on 3,247 single panes cut by `split_panes.py` from 322 real window photos
+  (real.zip, 46 unusable photos removed). On panes from 20 windows never seen in training
+  (192 px, 10–16 shards): ~42% of shards placed correctly (v1: ~8%, chance ~8%),
+  median rotation error ~20° (v1: ~33°). Resume from this one when training further.
+- Next: more epochs on a GPU, more real windows (`download_windows.py`), then 288 px with
+  24–48 shards.
 - `legacy/` — first version, which cut windows on a square grid.
