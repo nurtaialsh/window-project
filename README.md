@@ -45,6 +45,9 @@ network chose, turned by the angle it predicted, with the score underneath. It u
 `split_panes.py` cuts multi-light windows into single panes along the dark stonework.
 Training uses the GPU automatically when there is one (`--device cpu` to force CPU).
 Pass the same `--size/--kmin/--kmax/--crop` to `demo` and `eval` as you trained with.
+`--lead 0.5` makes half the training breaks follow the lead lines (`snap_to_lead`), as real
+glass tends to; those breaks are harder, and about 7x slower to make, so raise `--workers`.
+Training keeps the 3 best epochs (`--keep`) and at the end re-tests them and keeps the real best.
 
 ## Status
 - `checkpoints/model_v1_synthetic_10-16shards.pt`: trained on synthetic windows

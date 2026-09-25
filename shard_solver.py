@@ -35,7 +35,7 @@ from PIL import Image, ImageDraw
 from scipy.optimize import linear_sum_assignment
 from torch.utils.data import DataLoader, Dataset
 
-from shards import break_image, render_shards
+from shards import break_image, render_shards, snap_to_lead
 
 SIZE = 288      # window is resized to SIZE x SIZE
 CROP = 104      # shard crop at full res
@@ -86,10 +86,11 @@ def random_cracks(pool, rng):
 class ShatterDataset(Dataset):
     """Every access shatters a random window along a random crack pattern."""
 
-    def __init__(self, paths, samples_per_epoch=4000, augment=True):
+    def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0):
         self.imgs = [load_image(p) for p in paths]
         self.pool = crack_pool()
         self.crop = CROP  # kept here: on Windows, workers re-import the module defaults
+        self.lead = lead  # fraction of breaks whose cracks are moved onto the lead lines
         self.n = samples_per_epoch
         self.augment = augment
 
@@ -103,8 +104,11 @@ class ShatterDataset(Dataset):
             if rng.random() < 0.5:
                 img = img[:, ::-1]
             img = np.clip(img * rng.uniform(0.8, 1.2, (1, 1, 3)), 0, 255).astype(np.uint8)
-        s = render_shards(np.ascontiguousarray(img), random_cracks(self.pool, rng),
-                          self.crop, TILE, rng=rng)
+        img = np.ascontiguousarray(img)
+        labels = random_cracks(self.pool, rng)
+        if rng.random() < self.lead:
+            labels = snap_to_lead(img, labels, rng=rng)
+        s = render_shards(img, labels, self.crop, TILE, rng=rng)
         return s["tiles"], s["centers"], s["angles"]
 
 
@@ -190,7 +194,7 @@ def angle_err_deg(cs, angles):
 
 
 @torch.no_grad()
-def evaluate_model(model, imgs, trials=3, seed=0):
+def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0):
     model.eval()
     dev = next(model.parameters()).device
     rng = np.random.default_rng(seed)
@@ -199,7 +203,10 @@ def evaluate_model(model, imgs, trials=3, seed=0):
     for img in imgs:
         for _ in range(trials):
             k = int(rng.integers(KMIN, KMAX + 1))
-            s = render_shards(img, break_image(SIZE, SIZE, k, rng), CROP, TILE, rng=rng)
+            labels = break_image(SIZE, SIZE, k, rng)
+            if rng.random() < lead:
+                labels = snap_to_lead(img, labels, rng=rng)
+            s = render_shards(img, labels, CROP, TILE, rng=rng)
             xy, cs = model(torch.from_numpy(s["tiles"])[None].to(dev),
                            torch.zeros(1, len(s["tiles"]), dtype=torch.bool, device=dev))
             a = assign(xy[0].cpu().numpy(), s["centers"])
@@ -234,7 +241,7 @@ def train(a):
     rng.shuffle(val_paths)
     print(f"{len(tr_paths)} training images, {len(val_paths)} held-out images, on {dev}")
 
-    ds = ShatterDataset(tr_paths, a.samples)
+    ds = ShatterDataset(tr_paths, a.samples, lead=a.lead)
     dl = DataLoader(ds, batch_size=a.batch, collate_fn=collate,
                     num_workers=a.workers, persistent_workers=a.workers > 0,
                     pin_memory=dev.type == "cuda")
@@ -252,7 +259,7 @@ def train(a):
     best = -1
     if a.resume and os.path.exists(a.ckpt):
         # don't let a weak early epoch overwrite the model we resumed from
-        best = evaluate_model(model, val_imgs, trials=2, seed=0)["shard_acc"]
+        best = evaluate_model(model, val_imgs, trials=2, seed=0, lead=a.lead)["shard_acc"]
         print(f"starting point: held-out shards placed {best:.1%}")
     top = []   # (score, epoch, path) of the a.keep best epochs so far
     stem = os.path.splitext(a.ckpt)[0]
@@ -278,7 +285,7 @@ def train(a):
                 sched.step()
             step += 1
             lp += l_pos.item(); lr_ += l_rot.item()
-        m = evaluate_model(model, val_imgs, trials=2, seed=ep)
+        m = evaluate_model(model, val_imgs, trials=2, seed=ep, lead=a.lead)
         mins = (time.time() - t0) / 60
         print(f"ep {ep:3d} [{mins:5.1f} min] pos {lp / len(dl):.4f} rot {lr_ / len(dl):.3f} | "
               f"held-out: shards placed {m['shard_acc']:.1%}, perfect windows {m['perfect']:.0%}, "
@@ -307,7 +314,7 @@ def train(a):
         scores = []
         for _, ep, path in sorted(top, key=lambda t: t[1]):
             model.load_state_dict(torch.load(path, weights_only=True, map_location=dev))
-            m = evaluate_model(model, imgs, trials=a.final_trials, seed=12345)
+            m = evaluate_model(model, imgs, trials=a.final_trials, seed=12345, lead=a.lead)
             scores.append((m["shard_acc"], ep, path))
             print(f"  ep {ep:3d}: shards placed {m['shard_acc']:.1%}, perfect windows "
                   f"{m['perfect']:.1%}, rot median {m['rot_median']:.0f}°  ({path})", flush=True)
@@ -395,7 +402,7 @@ def evaluate(a):
     model = ShardSolver().to(dev)
     model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=dev))
     imgs = [load_image(p) for p in list_images(a.images)[:a.n]]
-    m = evaluate_model(model, imgs, trials=a.trials)
+    m = evaluate_model(model, imgs, trials=a.trials, lead=a.lead)
     print(f"{len(imgs)} windows x {a.trials} shatterings")
     print(f"  shards in correct place : {m['shard_acc']:.1%}")
     print(f"  fully correct windows   : {m['perfect']:.1%}")
@@ -428,6 +435,9 @@ def main():
     e.add_argument("--images", required=True)
     e.add_argument("--n", type=int, default=100)
     e.add_argument("--trials", type=int, default=3)
+    for p in (t, e):
+        p.add_argument("--lead", type=float, default=0.0,
+                       help="fraction of breaks whose cracks follow the lead lines (0-1)")
     for p in (t, d, e):
         p.add_argument("--ckpt", default="checkpoints/shards.pt")
         p.add_argument("--size", type=int, default=SIZE, help="window is resized to this")
