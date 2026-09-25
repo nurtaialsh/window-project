@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import math
 import os
 import shutil
@@ -56,10 +57,14 @@ def list_images(folder):
 
 # ───────────────────────── data ─────────────────────────
 
+def pool_path():
+    return f"checkpoints/cracks_{SIZE}_{KMIN}-{KMAX}.npy"
+
+
 def crack_pool(n=2000, path=None):
     """Crack layouts don't depend on the picture, so make a pool once and reuse it
     (with 8 flips/transposes each). Drawing them fresh every step was the bottleneck."""
-    path = path or f"checkpoints/cracks_{SIZE}_{KMIN}-{KMAX}.npy"
+    path = path or pool_path()
     if os.path.exists(path):
         pool = np.load(path)
         if len(pool) >= n:
@@ -83,12 +88,36 @@ def random_cracks(pool, rng):
     return np.ascontiguousarray(lab).astype(np.int64)
 
 
+def image_cache(paths, size):
+    """All training images, resized, in one .npy file. Workers memory-map it, so the
+    operating system keeps a single shared copy in RAM however many workers there are
+    (on Windows each worker used to hold its own full copy of every image)."""
+    h = hashlib.sha1(str(size).encode())
+    for p in paths:
+        st = os.stat(p)
+        h.update(f"{p}|{st.st_size}|{st.st_mtime_ns}".encode())
+    path = f"checkpoints/images_{size}_{h.hexdigest()[:12]}.npy"
+    if not os.path.exists(path):
+        print(f"caching {len(paths)} images in {path} (once for this set of images)", flush=True)
+        os.makedirs("checkpoints", exist_ok=True)
+        tmp = path + ".part"
+        arr = np.lib.format.open_memmap(tmp, "w+", np.uint8, (len(paths), size, size, 3))
+        for i, p in enumerate(paths):
+            arr[i] = load_image(p, size)
+        arr.flush()
+        del arr
+        os.replace(tmp, path)
+    return path
+
+
 class ShatterDataset(Dataset):
     """Every access shatters a random window along a random crack pattern."""
 
     def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0):
-        self.imgs = [load_image(p) for p in paths]
-        self.pool = crack_pool()
+        self.img_file = image_cache(paths, SIZE)
+        crack_pool()                     # make sure the crack file exists
+        self.pool_file = pool_path()
+        self._imgs = self._pool = None   # opened lazily, once per worker process
         self.crop = CROP  # kept here: on Windows, workers re-import the module defaults
         self.lead = lead  # fraction of breaks whose cracks are moved onto the lead lines
         self.n = samples_per_epoch
@@ -97,15 +126,21 @@ class ShatterDataset(Dataset):
     def __len__(self):
         return self.n
 
+    def __getstate__(self):
+        return {**self.__dict__, "_imgs": None, "_pool": None}
+
     def __getitem__(self, i):
+        if self._imgs is None:
+            self._imgs = np.load(self.img_file, mmap_mode="r")
+            self._pool = np.load(self.pool_file, mmap_mode="r")
         rng = np.random.default_rng()
-        img = self.imgs[rng.integers(len(self.imgs))]
+        img = np.array(self._imgs[rng.integers(len(self._imgs))])
         if self.augment:
             if rng.random() < 0.5:
                 img = img[:, ::-1]
             img = np.clip(img * rng.uniform(0.8, 1.2, (1, 1, 3)), 0, 255).astype(np.uint8)
         img = np.ascontiguousarray(img)
-        labels = random_cracks(self.pool, rng)
+        labels = random_cracks(self._pool, rng)
         if rng.random() < self.lead:
             labels = snap_to_lead(img, labels, rng=rng)
         s = render_shards(img, labels, self.crop, TILE, rng=rng)
