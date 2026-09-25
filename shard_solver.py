@@ -250,8 +250,16 @@ def train(a):
                                                 pct_start=0.05)
     t0 = time.time()
     best = -1
+    if a.resume and os.path.exists(a.ckpt):
+        # don't let a weak early epoch overwrite the model we resumed from
+        best = evaluate_model(model, val_imgs, trials=2, seed=0)["shard_acc"]
+        print(f"starting point: held-out shards placed {best:.1%}")
     top = []   # (score, epoch, path) of the a.keep best epochs so far
     stem = os.path.splitext(a.ckpt)[0]
+    if best >= 0 and a.keep:
+        # the starting model competes as "epoch 0", so it is only replaced if beaten
+        torch.save(model.state_dict(), f"{stem}_ep000.pt")
+        top.append((best, 0, f"{stem}_ep000.pt"))
     step = 0
     for ep in range(1, a.epochs + 1):
         model.train()
