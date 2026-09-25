@@ -30,7 +30,7 @@ learning to suggest where such fragments originally belonged.
     pip install numpy scipy pillow scikit-image requests
     python -c "import torch; print(torch.cuda.is_available())"             # must print True
     python split_panes.py --images data/real --out data/panes --thresh 30 --max-dark 0.45
-    copy checkpoints\model_v1_synthetic_10-16shards.pt checkpoints\shards.pt   # start from v1
+    copy checkpoints\model_v2_realpanes_10-16shards.pt checkpoints\shards.pt   # start from v2
     python shard_solver.py train --images data/panes --resume --epochs 40 --lr 5e-4 --workers 4 --size 192 --kmin 10 --kmax 16 --crop 104
 
 `split_panes.py` cuts multi-light windows into single panes along the dark stonework.
