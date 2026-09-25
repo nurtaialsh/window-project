@@ -4,3 +4,4 @@ __pycache__/
 checkpoints/*.npy
 checkpoints/shards.pt
 checkpoints/shards_v1_small.pt
+checkpoints/shards_ep*.pt

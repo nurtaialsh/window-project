@@ -24,6 +24,7 @@ import argparse
 import glob
 import math
 import os
+import shutil
 import time
 
 import numpy as np
@@ -249,6 +250,8 @@ def train(a):
                                                 pct_start=0.05)
     t0 = time.time()
     best = -1
+    top = []   # (score, epoch, path) of the a.keep best epochs so far
+    stem = os.path.splitext(a.ckpt)[0]
     step = 0
     for ep in range(1, a.epochs + 1):
         model.train()
@@ -275,10 +278,34 @@ def train(a):
         if m["shard_acc"] > best:
             best = m["shard_acc"]
             torch.save(model.state_dict(), a.ckpt)
+        if a.keep and (len(top) < a.keep or m["shard_acc"] > top[-1][0]):
+            path = f"{stem}_ep{ep:03d}.pt"
+            torch.save(model.state_dict(), path)
+            top.append((m["shard_acc"], ep, path))
+            top.sort(key=lambda t: -t[0])
+            for _, _, old in top[a.keep:]:
+                os.remove(old)
+            top = top[:a.keep]
         if a.minutes and mins > a.minutes:
             print("time budget reached")
             break
     print(f"best held-out shard accuracy {best:.1%}, saved {a.ckpt}")
+    if len(top) > 1:
+        # the per-epoch score uses few shatterings and is noisy; re-test the
+        # top epochs on every held-out image, more times, and keep the real best
+        imgs = [load_image(p) for p in val_paths]
+        print(f"re-testing the top {len(top)} epochs on {len(imgs)} held-out images "
+              f"x {a.final_trials} shatterings:")
+        scores = []
+        for _, ep, path in sorted(top, key=lambda t: t[1]):
+            model.load_state_dict(torch.load(path, weights_only=True, map_location=dev))
+            m = evaluate_model(model, imgs, trials=a.final_trials, seed=12345)
+            scores.append((m["shard_acc"], ep, path))
+            print(f"  ep {ep:3d}: shards placed {m['shard_acc']:.1%}, perfect windows "
+                  f"{m['perfect']:.1%}, rot median {m['rot_median']:.0f}°  ({path})", flush=True)
+        acc, ep, path = max(scores)
+        shutil.copyfile(path, a.ckpt)
+        print(f"kept epoch {ep} ({acc:.1%}) as {a.ckpt}")
 
 
 # ───────────────────────── demo ─────────────────────────
@@ -381,6 +408,9 @@ def main():
     t.add_argument("--lr", type=float, default=1e-3)
     t.add_argument("--workers", type=int, default=2)
     t.add_argument("--resume", action="store_true")
+    t.add_argument("--keep", type=int, default=3, help="also keep this many best epochs")
+    t.add_argument("--final-trials", type=int, default=5,
+                   help="shatterings per image when re-testing the kept epochs at the end")
     d = sub.add_parser("demo")
     d.add_argument("--image", required=True)
     d.add_argument("--out", default="result.png")
