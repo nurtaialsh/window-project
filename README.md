@@ -34,6 +34,14 @@ network chose, turned by the angle it predicted, with the score underneath. It u
 `checkpoints/model_v2_realpanes_10-16shards.pt` by default (`--ckpt` for another; pass
 `--size/--crop` if that one was trained with different settings).
 
+## Sorting scraped photos
+    python review_images.py --images data/more     # then open http://localhost:8001
+
+Shows every photo most-suspicious first, with the clear rejects (probably not a straight view
+of a window, black-and-white, duplicates) already marked. Click to flip a mark, then
+"Move marked out" moves them to `data/rejected`. The automatic marks are a guide, not a
+verdict: skim the top of the list before moving.
+
 ## Training on real windows (NVIDIA GPU)
     pip install torch --index-url https://download.pytorch.org/whl/cu124   # CUDA build of torch
     pip install numpy scipy pillow scikit-image requests
