@@ -116,12 +116,11 @@
         <input id="pieces" type="range" min="6" max="48" value="12"><output id="piecesv">12</output></div>
       <div class="field"><label>model</label>
         <div class="seg" id="models" role="radiogroup"></div></div>
-      <p class="hint" id="modelnote" style="margin:-8px 0 16px 84px"></p>
       <div class="field"><label>cracks</label>
         <div class="seg" id="lead" role="radiogroup">
           <button type="button" data-v="0">random</button>
-          <button type="button" data-v="1" title="original snap_to_lead">lead v1</button>
-          <button type="button" data-v="2" class="on" title="stricter lead detection">lead v2</button>
+          <button type="button" data-v="1">lead v1</button>
+          <button type="button" data-v="2" class="on">lead v2</button>
         </div></div>
       <div class="actions">
         <button id="go" class="primary" disabled>shatter &amp; solve</button>
@@ -234,7 +233,7 @@ async function loadModels() {
   box.innerHTML = "";
   for (const m of models) {
     const b = document.createElement("button");
-    b.type = "button"; b.textContent = m.label; b.title = m.note; b.dataset.id = m.id;
+    b.type = "button"; b.textContent = m.label; b.dataset.id = m.id;
     b.onclick = () => { pickModel(m.id); if (result) solve(true); };
     box.appendChild(b);
   }
@@ -243,8 +242,6 @@ async function loadModels() {
 function pickModel(id) {
   modelId = id;
   document.querySelectorAll("#models button").forEach(b => b.classList.toggle("on", b.dataset.id === id));
-  const m = models.find(m => m.id === id);
-  $("modelnote").textContent = m ? m.note : "";
 }
 loadModels();
 
@@ -252,7 +249,7 @@ async function solve(sameBreak = false) {
   if (!srcImg) return;
   $("err").textContent = "";
   $("go").disabled = $("again").disabled = true;
-  $("caption").textContent = "Breaking the pane and asking the network…";
+  $("caption").textContent = "";
   try {
     const q = new URLSearchParams({ pieces: $("pieces").value, lead: leadMode, model: modelId });
     if (sameBreak && lastSeed !== null) q.set("seed", lastSeed);
@@ -351,11 +348,7 @@ function frame(stage, t) {
   if (stage === 2 && t >= 1 && showWrong) ctx.drawImage(layers.wrong, M, M, D, D);
 }
 
-const captions = [
-  "The pane, and the lines along which it will break.",
-  "Broken, turned and shuffled.",
-  "The network sets each shard back in place.",
-];
+const captions = ["", "", ""];   // no running commentary during the animation
 function play() {
   cancelAnimationFrame(anim);
   fit();

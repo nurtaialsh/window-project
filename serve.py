@@ -26,11 +26,12 @@ import torch
 from PIL import Image
 
 import shard_solver as ss
-from shards import break_image, render_shards, snap_to_lead, snap_to_lead2
+from shards import break_image, lead_map2, render_shards, snap_to_lead, snap_to_lead2
 from split_panes import build_parser as pane_options, split_image
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SCALE = 3          # shards are drawn at SCALE x the size the network works at
+BLACK_LO, BLACK_HI = 22, 48   # grey levels: fully see-through below LO, solid above HI
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -63,21 +64,30 @@ def smooth_upscale(labels: np.ndarray) -> np.ndarray:
     return np.argmax(np.stack(soft), 0)
 
 
-def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles, crop: int):
+def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles, crop: int,
+                   lead: np.ndarray | None = None):
     """Cut the same shards as render_shards, but from the SCALE x image (and the
     smooth SCALE x label map `lab`), so the page can draw them sharp. Same
     centroids and rotations as the network saw."""
     pad = crop // 2
     img_p = np.pad(big, ((pad, pad), (pad, pad), (0, 0)))
     lab_p = np.pad(lab, pad, constant_values=-1)
+    if lead is not None:
+        lead_p = np.pad(lead, pad)
     out = []
     for i, ang in enumerate(angles):
         ys, xs = np.nonzero(labels == i)
         y0 = int(round(ys.mean() * SCALE + (SCALE - 1) / 2))
         x0 = int(round(xs.mean() * SCALE + (SCALE - 1) / 2))
         rgb = img_p[y0:y0 + crop, x0:x0 + crop]
-        m = (lab_p[y0:y0 + crop, x0:x0 + crop] == i).astype(np.uint8) * 255
-        im = Image.fromarray(np.dstack([rgb, m]), "RGBA")
+        m = (lab_p[y0:y0 + crop, x0:x0 + crop] == i).astype(np.float32)
+        # for display only: near-black (lead lines, dark edges) fades to transparent,
+        # so each shard reads as a loose piece of glass
+        lum = rgb.astype(np.float32).mean(2)
+        m *= np.clip((lum - BLACK_LO) / (BLACK_HI - BLACK_LO), 0, 1)
+        if lead is not None:                     # and the detected lead cames
+            m *= np.clip(1 - 1.6 * lead_p[y0:y0 + crop, x0:x0 + crop], 0, 1)
+        im = Image.fromarray(np.dstack([rgb, (m * 255).astype(np.uint8)]), "RGBA")
         out.append(np.array(im.rotate(np.degrees(ang), resample=Image.BICUBIC)))
     return out
 
@@ -165,7 +175,9 @@ class Solver:
         pred = np.arctan2(cs[:, 1], cs[:, 0])
         rot_err = ss.angle_err_deg(cs, s["angles"])
         big_lab = smooth_upscale(labels)
-        shards = display_shards(big, labels, big_lab, s["angles"], crop * SCALE)
+        lead_big = np.asarray(Image.fromarray(lead_map2(img).astype(np.float32))
+                              .resize((size * SCALE, size * SCALE), Image.BILINEAR))
+        shards = display_shards(big, labels, big_lab, s["angles"], crop * SCALE, lead_big)
 
         wrong = np.zeros(big_lab.shape, bool)
         for i in range(K):
