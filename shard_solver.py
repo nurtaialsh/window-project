@@ -111,8 +111,11 @@ def image_cache(paths, size):
 
 
 def snap(img, labels, rng, method, leadmap=None):
-    """Move crack lines onto the lead: method 1 = snap_to_lead, 2 = snap_to_lead2."""
-    if method == 1:
+    """Move crack lines onto the lead: method "1" = snap_to_lead, "2" = snap_to_lead2,
+    "both" = either, 50/50 per break."""
+    if method == "both":
+        method = "1" if rng.random() < 0.5 else "2"
+    if method == "1":
         return snap_to_lead(img, labels, rng=rng)
     return snap_to_lead2(img, labels, rng=rng, leadmap=leadmap)
 
@@ -145,10 +148,10 @@ def lead_cache(img_file):
 class ShatterDataset(Dataset):
     """Every access shatters a random window along a random crack pattern."""
 
-    def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0, lead_method=2):
+    def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0, lead_method="2"):
         self.img_file = image_cache(paths, SIZE)
         self.lead_method = lead_method
-        self.lead_file = lead_cache(self.img_file) if lead > 0 and lead_method == 2 else None
+        self.lead_file = lead_cache(self.img_file) if lead > 0 and lead_method != "1" else None
         self._leads = None
         crack_pool()                     # make sure the crack file exists
         self.pool_file = pool_path()
@@ -272,9 +275,9 @@ def angle_err_deg(cs, angles):
 
 
 @torch.no_grad()
-def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method=2, leadmaps=None):
+def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method="2", leadmaps=None):
     model.eval()
-    if lead > 0 and lead_method == 2 and leadmaps is None:
+    if lead > 0 and lead_method != "1" and leadmaps is None:
         leadmaps = [lead_map2(img) for img in imgs]
     dev = next(model.parameters()).device
     rng = np.random.default_rng(seed)
@@ -326,7 +329,7 @@ def train(a):
                     num_workers=a.workers, persistent_workers=a.workers > 0,
                     pin_memory=dev.type == "cuda")
     val_imgs = [load_image(p) for p in val_paths[:40]]
-    need_maps = a.lead > 0 and a.lead_method == 2
+    need_maps = a.lead > 0 and a.lead_method != "1"
     val_maps = [lead_map2(i) for i in val_imgs] if need_maps else None
     ev = dict(lead=a.lead, lead_method=a.lead_method)
 
@@ -522,8 +525,9 @@ def main():
     for p in (t, e):
         p.add_argument("--lead", type=float, default=0.0,
                        help="fraction of breaks whose cracks follow the lead lines (0-1)")
-        p.add_argument("--lead-method", type=int, default=2, choices=(1, 2),
-                       help="1 = original snap_to_lead, 2 = snap_to_lead2 (stricter lead detection)")
+        p.add_argument("--lead-method", default="2", choices=("1", "2", "both"),
+                       help="1 = original snap_to_lead, 2 = snap_to_lead2 (stricter lead "
+                            "detection), both = either one, 50/50 per break")
     for p in (t, d, e):
         p.add_argument("--ckpt", default="checkpoints/shards.pt")
         p.add_argument("--size", type=int, default=SIZE, help="window is resized to this")

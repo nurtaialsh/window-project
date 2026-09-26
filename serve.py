@@ -89,7 +89,6 @@ class Solver:
         self.model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=self.dev))
         self.model.eval()
         self.pane_opts = pane_options().parse_args([])
-        self.lead_method = a.lead_method
 
     def panes(self, data: bytes):
         img = np.array(Image.open(io.BytesIO(data)).convert("RGB"))
@@ -107,9 +106,10 @@ class Solver:
         img = np.array(pil.resize((size, size), Image.BICUBIC))
         big = np.array(pil.resize((size * SCALE, size * SCALE), Image.BICUBIC))
         labels = break_image(size, size, pieces, rng)
-        if lead:
-            snapper = snap_to_lead2 if self.lead_method == 2 else snap_to_lead
-            labels = snapper(img, labels, rng=rng)
+        if lead == 1:
+            labels = snap_to_lead(img, labels, rng=rng)
+        elif lead == 2:
+            labels = snap_to_lead2(img, labels, rng=rng)
         s = render_shards(img, labels, crop, ss.TILE, rng=rng)
         K = len(s["tiles"])
         xy, cs = self.model(torch.from_numpy(s["tiles"])[None].to(self.dev),
@@ -176,7 +176,8 @@ def make_handler(solver: Solver):
                 if url.path == "/api/solve":
                     pieces = min(max(int(q.get("pieces", 12)), 4), 48)
                     seed = int(q["seed"]) if q.get("seed") else None
-                    return self._json(solver.solve(data, pieces, seed, q.get("lead") == "1"))
+                    lead = {"1": 1, "2": 2}.get(q.get("lead"), 0)   # 0 random, 1 original, 2 improved
+                    return self._json(solver.solve(data, pieces, seed, lead))
                 self._json({"error": "unknown endpoint"}, 404)
             except Exception as e:  # bad image etc. - report it on the page
                 self._json({"error": f"{type(e).__name__}: {e}"}, 400)
@@ -193,8 +194,6 @@ def main():
     ap.add_argument("--size", type=int, default=192, help="must match the checkpoint")
     ap.add_argument("--crop", type=int, default=104, help="must match the checkpoint")
     ap.add_argument("--device", default="auto", help="auto, cpu or cuda")
-    ap.add_argument("--lead-method", type=int, default=2, choices=(1, 2),
-                    help="how cracks follow the lead: 1 = original, 2 = stricter detection")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     a = ap.parse_args()

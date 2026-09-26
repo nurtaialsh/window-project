@@ -57,7 +57,8 @@ Pass the same `--size/--kmin/--kmax/--crop` to `demo` and `eval` as you trained 
 `--lead-method 2` (the default) uses `snap_to_lead2`: a ridge filter finds line-shaped dark
 cames and keeps only long connected networks, so dark glass and paint strokes aren't mistaken
 for lead; the lead maps are computed once per image and cached. `--lead-method 1` is the
-original `snap_to_lead`.
+original `snap_to_lead`; `--lead-method both` mixes the two 50/50. In the web app the
+"cracks" setting chooses random, lead v1 or lead v2.
 Training keeps the 3 best epochs (`--keep`) and at the end re-tests them and keeps the real best.
 
 ## Status

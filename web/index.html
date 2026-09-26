@@ -58,6 +58,11 @@
   .field > label { color: var(--muted); font-size: 12.5px; }
   .field output { font: 20px var(--sans); min-width: 2ch; text-align: right; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
+  .seg { display: flex; flex-wrap: wrap; gap: 4px 14px; grid-column: 2 / 4; }
+  .seg button { background: none; border: 0; padding: 2px 0; color: var(--muted);
+                border-bottom: 1px solid transparent; font-size: 13px; }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { color: var(--text); border-bottom-color: var(--text); }
   .check { display: flex; gap: 10px; align-items: center; margin: 4px 0 22px; color: var(--text); cursor: pointer; }
   .check input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 
@@ -109,7 +114,12 @@
       <h2><i>ii.</i> break</h2>
       <div class="field"><label for="pieces">shards</label>
         <input id="pieces" type="range" min="6" max="48" value="12"><output id="piecesv">12</output></div>
-      <label class="check"><input id="lead" type="checkbox" checked> cracks follow the lead lines</label>
+      <div class="field"><label>cracks</label>
+        <div class="seg" id="lead" role="radiogroup">
+          <button type="button" data-v="0">random</button>
+          <button type="button" data-v="1" title="original snap_to_lead">lead v1</button>
+          <button type="button" data-v="2" class="on" title="stricter lead detection">lead v2</button>
+        </div></div>
       <div class="actions">
         <button id="go" class="primary" disabled>shatter &amp; solve</button>
         <button id="again" class="quiet" disabled>break again</button>
@@ -204,6 +214,11 @@ async function post(url, body) {
 
 // ── solving ───────────────────────────────────────────────────
 $("pieces").oninput = e => $("piecesv").textContent = e.target.value;
+let leadMode = "2";
+document.querySelectorAll("#lead button").forEach(b => b.onclick = () => {
+  leadMode = b.dataset.v;
+  document.querySelectorAll("#lead button").forEach(x => x.classList.toggle("on", x === b));
+});
 $("go").onclick = () => solve();
 $("again").onclick = () => solve();
 
@@ -213,7 +228,7 @@ async function solve() {
   $("go").disabled = $("again").disabled = true;
   $("caption").textContent = "Breaking the pane and asking the network…";
   try {
-    const q = new URLSearchParams({ pieces: $("pieces").value, lead: $("lead").checked ? 1 : 0 });
+    const q = new URLSearchParams({ pieces: $("pieces").value, lead: leadMode });
     result = await post("/api/solve?" + q, await paneBlob());
     await prepare(result);
     showStats(result);
