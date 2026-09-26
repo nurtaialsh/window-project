@@ -31,7 +31,7 @@ learning to suggest where such fragments originally belonged.
 Drop in a window photo; multi-light windows are split into panes you can click. The
 network shatters the pane, and the page animates each shard flying to the hole the
 network chose, turned by the angle it predicted, with the score underneath. It uses
-`checkpoints/model_v2_realpanes_10-16shards.pt` by default (`--ckpt` for another; pass
+`checkpoints/model_v6_real_lead_10-16shards.pt` by default (`--ckpt` for another; pass
 `--size/--crop` if that one was trained with different settings).
 
 ## Sorting scraped photos
@@ -47,7 +47,7 @@ verdict: skim the top of the list before moving.
     pip install numpy scipy pillow scikit-image requests
     python -c "import torch; print(torch.cuda.is_available())"             # must print True
     python split_panes.py --images data/real --out data/panes
-    copy checkpoints\model_v2_realpanes_10-16shards.pt checkpoints\shards.pt   # start from v2
+    copy checkpoints\model_v6_real_lead_10-16shards.pt checkpoints\shards.pt   # start from v6
     python shard_solver.py train --images data/panes --resume --epochs 40 --lr 5e-4 --workers 4 --size 192 --kmin 10 --kmax 16 --crop 104
 
 `split_panes.py` cuts multi-light windows into single panes along the dark stonework.
@@ -66,7 +66,12 @@ Training keeps the 3 best epochs (`--keep`) and at the end re-tests them and kee
   4 CPU cores) on 3,247 single panes cut by `split_panes.py` from 322 real window photos
   (real.zip, 46 unusable photos removed). On panes from 20 windows never seen in training
   (192 px, 10–16 shards): ~42% of shards placed correctly (v1: ~8%, chance ~8%),
-  median rotation error ~20° (v1: ~33°). Resume from this one when training further.
-- Next: more epochs on a GPU, more real windows (`download_windows.py`), then 288 px with
-  24–48 shards.
+  median rotation error ~20° (v1: ~33°).
+- `checkpoints/model_v6_real_lead_10-16shards.pt`: v2 trained on an RTX 4070 (~340 epochs
+  on real.zip panes, ~790 overnight after adding scraped windows, then a 300-epoch cool-down
+  at a lower learning rate), on 10,227 panes with half the breaks following the lead lines
+  (`--lead 0.5`). Re-tested on 664 held-out panes (whole windows held out) x 5 shatterings:
+  **75.8% of shards placed correctly, 17.6% of windows perfect, median rotation error 2°**.
+  The current best; resume from this one.
+- Next: 288 px with 20–32 shards (more detail per shard), then 24–48.
 - `legacy/` — first version, which cut windows on a square grid.
