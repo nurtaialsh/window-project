@@ -61,6 +61,7 @@
   .primary:hover:not(:disabled) { background: #f2f2f2; color: #0b0b0b; }
   .quiet { background: none; border: 0; padding: 12px 0; color: var(--muted); }
   .quiet:hover:not(:disabled) { color: var(--text); }
+  .quiet.on { color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
   button:disabled { opacity: .35; cursor: default; }
   #err { color: var(--bad); margin-top: 14px; white-space: pre-wrap; font-size: 13px; }
 
@@ -109,6 +110,7 @@
       <button class="quiet" id="replay" disabled>replay</button>
       <button class="quiet" id="mistakes" disabled>mistakes</button>
       <button class="quiet" id="peek" disabled>original</button>
+      <button class="quiet" id="cracksbtn">cracks</button>
     </div>
     <div id="stats" hidden>
       <div class="stat"><b id="s1">–</b><span>placed</span></div>
@@ -282,6 +284,19 @@ function drawSprite(sp, pose) {
   ctx.restore();
 }
 
+// optional intro: the intact pane with its crack lines, then the burst into the scatter
+function intro(t, burst) {
+  const D = result.size;
+  ctx.clearRect(0, 0, D + 2 * M, D + 2 * M);
+  if (!burst) {
+    ctx.drawImage(layers.image, M, M, D, D);
+    ctx.drawImage(layers.cracks, M, M, D, D);
+    return;
+  }
+  const e = ease(t);
+  sprites.forEach(sp => drawSprite(sp, lerpPose(sp.home, sp.scatter, e)));
+}
+
 // t = 0: shards scattered; t = 1: shards in the holes the network chose
 function frame(t) {
   const D = result.size;
@@ -297,16 +312,22 @@ function frame(t) {
 function play() {
   cancelAnimationFrame(anim);
   fit();
-  const dur = 700, t0 = performance.now();
+  const hold = showCracks ? 900 : 0, burst = showCracks ? 400 : 0, dur = 700;
+  const t0 = performance.now();
   const tick = now => {
-    const t = Math.min(1, (now - t0) / dur);
-    frame(t);
-    if (t < 1) anim = requestAnimationFrame(tick);
+    const el = now - t0;
+    if (el < hold) intro(0, false);
+    else if (el < hold + burst) intro((el - hold) / burst, true);
+    else frame(Math.min(1, (el - hold - burst) / dur));
+    if (el < hold + burst + dur) anim = requestAnimationFrame(tick);
+    else frame(1);
   };
   anim = requestAnimationFrame(tick);
 }
 
 $("replay").onclick = () => result && play();
+let showCracks = false;
+$("cracksbtn").onclick = () => { showCracks = !showCracks; $("cracksbtn").classList.toggle("on", showCracks); };
 $("mistakes").onclick = () => {
   showWrong = !showWrong;
   $("mistakes").textContent = showWrong ? "Hide mistakes" : "Show mistakes";
