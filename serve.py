@@ -129,8 +129,8 @@ class Solver:
         return dict(
             size=D,
             image=png_url(big),
-            cracks=png_url(overlay(edges(big_lab), (236, 228, 212))),
-            wrong=png_url(overlay(wrong, (197, 103, 90))),
+            cracks=png_url(overlay(edges(big_lab), (255, 255, 255))),
+            wrong=png_url(overlay(wrong, (255, 255, 255))),
             shards=[dict(png=png_url(shards[i]),
                          home=[float(s["centers"][i][0] * D), float(s["centers"][i][1] * D)],
                          hole=[float(s["centers"][slot[i]][0] * D),
