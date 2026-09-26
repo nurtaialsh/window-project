@@ -189,7 +189,7 @@ def make_handler(solver: Solver):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="checkpoints/model_v6_real_lead_10-16shards.pt")
+    ap.add_argument("--ckpt", default="checkpoints/model_v7_leadonly_10-16shards.pt")
     ap.add_argument("--size", type=int, default=192, help="must match the checkpoint")
     ap.add_argument("--crop", type=int, default=104, help="must match the checkpoint")
     ap.add_argument("--device", default="auto", help="auto, cpu or cuda")
