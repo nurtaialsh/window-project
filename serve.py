@@ -172,7 +172,7 @@ def make_handler(solver: Solver):
                 if url.path == "/api/panes":
                     return self._json(solver.panes(data))
                 if url.path == "/api/solve":
-                    pieces = min(max(int(q.get("pieces", 12)), 4), 40)
+                    pieces = min(max(int(q.get("pieces", 12)), 4), 48)
                     seed = int(q["seed"]) if q.get("seed") else None
                     return self._json(solver.solve(data, pieces, seed, q.get("lead") == "1"))
                 self._json({"error": "unknown endpoint"}, 404)

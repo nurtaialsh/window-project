@@ -75,7 +75,7 @@
     <div class="panel">
       <h2>2 · Shatter</h2>
       <div class="row"><label for="pieces">Shards</label>
-        <input id="pieces" type="range" min="6" max="24" value="12"><b id="piecesv">12</b></div>
+        <input id="pieces" type="range" min="6" max="48" value="12"><b id="piecesv">12</b></div>
       <div class="row"><label for="seed">Seed</label>
         <input id="seed" type="number" placeholder="random"></div>
       <div class="row"><label></label>
@@ -84,7 +84,7 @@
         <button id="go" disabled>Shatter &amp; solve</button>
         <button id="again" class="ghost" disabled>Shatter again</button>
       </div>
-      <p class="hint">The model was trained on 10–16 shards. More shards is harder.</p>
+      <p class="hint">Use about as many shards as the model was trained on (v6: 10–16). More shards is harder.</p>
       <div id="err"></div>
     </div>
   </section>
