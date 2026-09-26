@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>window shard solver</title>
+<title>shard solver</title>
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -18,27 +18,16 @@
          -webkit-font-smoothing: antialiased; }
   ::selection { background: rgba(255, 255, 255, .25); }
 
-  header { max-width: 1240px; margin: 0 auto; padding: 44px 40px 26px; border-bottom: 1px solid var(--line); }
-  .over { font-size: 13px; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; }
-  h1 { font: 300 34px/1.15 var(--sans); margin: 0; letter-spacing: -.005em; }
-  header p.lede { font: 17px/1.5 var(--sans); color: var(--muted); margin: 10px 0 0; max-width: 60ch; }
 
   main { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 330px 1fr; gap: 56px;
          padding: 34px 40px 64px; }
   @media (max-width: 900px) {
     main { grid-template-columns: 1fr; gap: 36px; padding: 26px 16px 48px; }
-    header { padding: 30px 16px 20px; }
-    h1 { font-size: 28px; }
-  }
+      }
 
-  .step + .step { margin-top: 34px; padding-top: 30px; border-top: 1px solid var(--line); }
-  .step h2 { display: flex; gap: 12px; align-items: baseline; margin: 0 0 16px;
-             font: 400 13px var(--sans); letter-spacing: .04em; color: var(--muted); }
-  .step h2 i { font: 15px var(--sans); font-style: normal; letter-spacing: 0; color: var(--text); }
 
   #drop { border: 1px dashed var(--line-strong); padding: 34px 18px; text-align: center; cursor: pointer;
           font: 16px/1.45 var(--sans); color: var(--muted); transition: border-color .2s, color .2s, background .2s; }
-  #drop small { display: block; margin-top: 6px; font: 12px var(--sans); color: var(--faint);  }
   #drop:hover, #drop.over { border-color: var(--accent); color: var(--text); background: rgba(255, 255, 255, .03); }
   #drop input { display: none; }
   #picker { display: none; margin-top: 18px; }
@@ -47,7 +36,6 @@
   .box { position: absolute; border: 1px solid rgba(255, 255, 255, .4); cursor: pointer; transition: background .15s, border-color .15s; }
   .box:hover { border-color: var(--text); background: rgba(255, 255, 255, .08); }
   .box.sel { border: 1.5px solid #fff; background: rgba(255, 255, 255, .16); }
-  .hint { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
   .link { background: none; border: 0; padding: 0; margin-top: 8px; font: 13px var(--sans); color: var(--muted);
           letter-spacing: 0; text-transform: none;
           cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
@@ -77,9 +65,8 @@
   #err { color: var(--bad); margin-top: 14px; white-space: pre-wrap; font-size: 13px; }
 
   #stagewrap { max-width: 780px; margin: 0 auto; }
-  canvas { width: 100%; aspect-ratio: 1; display: block; }
-  #caption { max-width: 780px; margin: 6px auto 0; text-align: center; min-height: 26px;
-             font: 16px/1.5 var(--sans); color: var(--muted); }
+  canvas { width: 100%; max-width: 780px; aspect-ratio: 1; display: block; margin: 0 auto; }
+  #drop, #picker { margin-bottom: 26px; }
   #steps { display: flex; justify-content: center; gap: 28px; margin: 12px 0 0; flex-wrap: wrap; }
   #steps button { padding: 6px 0; }
   #stats { max-width: 780px; margin: 30px auto 0; display: grid; grid-template-columns: repeat(3, 1fr);
@@ -93,56 +80,40 @@
 </style>
 </head>
 <body>
-<header>
-  <p class="over">stained glass · shard reassembly</p>
-  <h1>window shard solver</h1>
-  <p class="lede">break a pane of stained glass, scatter the pieces, and watch a neural network return each one to its place, guided only by what is painted on it.</p>
-</header>
 <main>
   <section>
-    <div class="step">
-      <h2><i>i.</i> window</h2>
-      <div id="drop"><input id="file" type="file" accept="image/*">
-        drop a photograph of a window here<small>or click to choose a file</small></div>
-      <div id="picker">
-        <div id="pickwrap"><img id="pickimg" alt="uploaded window"></div>
-        <p class="hint" id="pickhint"></p>
-        <button class="link" id="whole">use the whole image</button>
-      </div>
+    <div id="drop"><input id="file" type="file" accept="image/*">image</div>
+    <div id="picker">
+      <div id="pickwrap"><img id="pickimg" alt=""></div>
+      <button class="link" id="whole">whole image</button>
     </div>
-    <div class="step">
-      <h2><i>ii.</i> break</h2>
-      <div class="field"><label for="pieces">shards</label>
-        <input id="pieces" type="range" min="6" max="48" value="12"><output id="piecesv">12</output></div>
-      <div class="field"><label>model</label>
-        <div class="seg" id="models" role="radiogroup"></div></div>
-      <div class="field"><label>cracks</label>
-        <div class="seg" id="lead" role="radiogroup">
-          <button type="button" data-v="0">random</button>
-          <button type="button" data-v="1">lead v1</button>
-          <button type="button" data-v="2" class="on">lead v2</button>
-        </div></div>
-      <div class="actions">
-        <button id="go" class="primary" disabled>shatter &amp; solve</button>
-        <button id="again" class="quiet" disabled>break again</button>
-      </div>
-      <div id="err"></div>
+    <div class="field"><label for="pieces">shards</label>
+      <input id="pieces" type="range" min="6" max="48" value="12"><output id="piecesv">12</output></div>
+    <div class="field"><label>model</label>
+      <div class="seg" id="models" role="radiogroup"></div></div>
+    <div class="field"><label>cracks</label>
+      <div class="seg" id="lead" role="radiogroup">
+        <button type="button" data-v="0">random</button>
+        <button type="button" data-v="1">lead v1</button>
+        <button type="button" data-v="2" class="on">lead v2</button>
+      </div></div>
+    <div class="actions">
+      <button id="go" class="primary" disabled>solve</button>
+      <button id="again" class="quiet" disabled>again</button>
     </div>
+    <div id="err"></div>
   </section>
   <section>
-    <div id="stagewrap">
-      <canvas id="stage" width="760" height="760"></canvas>
-    </div>
-    <p id="caption">choose a window to begin.</p>
+    <canvas id="stage" width="760" height="760"></canvas>
     <div id="steps">
       <button class="quiet" id="replay" disabled>replay</button>
-      <button class="quiet" id="mistakes" disabled>show mistakes</button>
-      <button class="quiet" id="peek" disabled>hold to compare</button>
+      <button class="quiet" id="mistakes" disabled>mistakes</button>
+      <button class="quiet" id="peek" disabled>original</button>
     </div>
     <div id="stats" hidden>
-      <div class="stat"><b id="s1">–</b><span>shards placed</span></div>
-      <div class="stat"><b id="s2">–</b><span>median turn error</span></div>
-      <div class="stat"><b id="s3">–</b><span>turned within 15°</span></div>
+      <div class="stat"><b id="s1">–</b><span>placed</span></div>
+      <div class="stat"><b id="s2">–</b><span>turn error</span></div>
+      <div class="stat"><b id="s3">–</b><span>within 15°</span></div>
     </div>
   </section>
 </main>
@@ -169,7 +140,6 @@ async function load(file) {
                                             im.onerror = bad; im.src = srcBlobUrl; });
   $("pickimg").src = srcBlobUrl;
   $("picker").style.display = "block";
-  $("pickhint").textContent = "Looking for single panes…";
   document.querySelectorAll(".box").forEach(b => b.remove());
   select(null);
   $("go").disabled = false;
@@ -185,11 +155,8 @@ async function load(file) {
       b.onclick = () => select(i);
       wrap.appendChild(b);
     });
-    $("pickhint").textContent = panes.length > 1
-      ? `Found ${panes.length} panes. Click one to shatter it.`
-      : "Looks like a single pane — the whole image will be used.";
     if (panes.length > 1) select(0);
-  } catch (e) { $("pickhint").textContent = "Couldn't find panes; the whole image will be used."; }
+  } catch (e) { /* no panes found: the whole image is used */ }
 }
 
 function select(i) {
@@ -249,7 +216,6 @@ async function solve(sameBreak = false) {
   if (!srcImg) return;
   $("err").textContent = "";
   $("go").disabled = $("again").disabled = true;
-  $("caption").textContent = "";
   try {
     const q = new URLSearchParams({ pieces: $("pieces").value, lead: leadMode, model: modelId });
     if (sameBreak && lastSeed !== null) q.set("seed", lastSeed);
@@ -260,7 +226,6 @@ async function solve(sameBreak = false) {
     play();
   } catch (e) {
     $("err").textContent = e.message;
-    $("caption").textContent = "Something went wrong.";
   } finally {
     $("go").disabled = $("again").disabled = false;
   }
@@ -348,27 +313,21 @@ function frame(stage, t) {
   if (stage === 2 && t >= 1 && showWrong) ctx.drawImage(layers.wrong, M, M, D, D);
 }
 
-const captions = ["", "", ""];   // no running commentary during the animation
 function play() {
   cancelAnimationFrame(anim);
   fit();
   const durs = [1400, 1700, 3200], pause = 600;
   let stage = 0, t0 = performance.now();
-  $("caption").textContent = captions[0];
   const tick = now => {
     const t = Math.min(1, (now - t0) / durs[stage]);
     frame(stage, t);
     if (now - t0 < durs[stage] + (stage < 2 ? pause : 0)) { anim = requestAnimationFrame(tick); return; }
     if (stage === 2) return done();
-    stage++; t0 = now; $("caption").textContent = captions[stage];
+    stage++; t0 = now;
     anim = requestAnimationFrame(tick);
   };
   const done = () => {
     frame(2, 1);
-    const who = (models.find(m => m.id === result.model) || {}).label || "";
-    $("caption").textContent = (who ? who + ": " : "") + (result.correct === result.total
-      ? `every one of the ${result.total} shards is back in its place.`
-      : `${result.correct} of ${result.total} shards returned to their place.`);
   };
   anim = requestAnimationFrame(tick);
 }
@@ -388,8 +347,7 @@ $("peek").onpointerdown = () => peek(true);
   const d = 576 + 2 * M; cv.width = cv.height = d;
   ctx.strokeStyle = "rgba(255, 255, 255, .12)"; ctx.setLineDash([4, 6]);
   ctx.strokeRect(M + .5, M + .5, 576 - 1, 576 - 1);
-  ctx.fillStyle = "#5e5e5e"; ctx.font = "20px 'Segoe UI', system-ui, sans-serif";
-  ctx.textAlign = "center"; ctx.fillText("the pane will appear here", d / 2, d / 2);
+
 })();
 </script>
 </body>
