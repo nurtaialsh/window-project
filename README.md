@@ -53,8 +53,11 @@ verdict: skim the top of the list before moving.
 `split_panes.py` cuts multi-light windows into single panes along the dark stonework.
 Training uses the GPU automatically when there is one (`--device cpu` to force CPU).
 Pass the same `--size/--kmin/--kmax/--crop` to `demo` and `eval` as you trained with.
-`--lead 0.5` makes half the training breaks follow the lead lines (`snap_to_lead`), as real
-glass tends to; those breaks are harder, and about 7x slower to make, so raise `--workers`.
+`--lead 0.5` makes half the training breaks follow the lead lines, as real glass tends to.
+`--lead-method 2` (the default) uses `snap_to_lead2`: a ridge filter finds line-shaped dark
+cames and keeps only long connected networks, so dark glass and paint strokes aren't mistaken
+for lead; the lead maps are computed once per image and cached. `--lead-method 1` is the
+original `snap_to_lead`.
 Training keeps the 3 best epochs (`--keep`) and at the end re-tests them and keeps the real best.
 
 ## Status

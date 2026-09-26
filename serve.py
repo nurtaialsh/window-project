@@ -26,7 +26,7 @@ import torch
 from PIL import Image
 
 import shard_solver as ss
-from shards import break_image, render_shards, snap_to_lead
+from shards import break_image, render_shards, snap_to_lead, snap_to_lead2
 from split_panes import build_parser as pane_options, split_image
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -89,6 +89,7 @@ class Solver:
         self.model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=self.dev))
         self.model.eval()
         self.pane_opts = pane_options().parse_args([])
+        self.lead_method = a.lead_method
 
     def panes(self, data: bytes):
         img = np.array(Image.open(io.BytesIO(data)).convert("RGB"))
@@ -107,7 +108,8 @@ class Solver:
         big = np.array(pil.resize((size * SCALE, size * SCALE), Image.BICUBIC))
         labels = break_image(size, size, pieces, rng)
         if lead:
-            labels = snap_to_lead(img, labels, rng=rng)
+            snapper = snap_to_lead2 if self.lead_method == 2 else snap_to_lead
+            labels = snapper(img, labels, rng=rng)
         s = render_shards(img, labels, crop, ss.TILE, rng=rng)
         K = len(s["tiles"])
         xy, cs = self.model(torch.from_numpy(s["tiles"])[None].to(self.dev),
@@ -191,6 +193,8 @@ def main():
     ap.add_argument("--size", type=int, default=192, help="must match the checkpoint")
     ap.add_argument("--crop", type=int, default=104, help="must match the checkpoint")
     ap.add_argument("--device", default="auto", help="auto, cpu or cuda")
+    ap.add_argument("--lead-method", type=int, default=2, choices=(1, 2),
+                    help="how cracks follow the lead: 1 = original, 2 = stricter detection")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     a = ap.parse_args()

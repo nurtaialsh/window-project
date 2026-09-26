@@ -36,7 +36,7 @@ from PIL import Image, ImageDraw
 from scipy.optimize import linear_sum_assignment
 from torch.utils.data import DataLoader, Dataset
 
-from shards import break_image, render_shards, snap_to_lead
+from shards import break_image, lead_map2, render_shards, snap_to_lead, snap_to_lead2
 
 SIZE = 288      # window is resized to SIZE x SIZE
 CROP = 104      # shard crop at full res
@@ -110,11 +110,46 @@ def image_cache(paths, size):
     return path
 
 
+def snap(img, labels, rng, method, leadmap=None):
+    """Move crack lines onto the lead: method 1 = snap_to_lead, 2 = snap_to_lead2."""
+    if method == 1:
+        return snap_to_lead(img, labels, rng=rng)
+    return snap_to_lead2(img, labels, rng=rng, leadmap=leadmap)
+
+
+def _leadmap_job(job):
+    img_file, i = job
+    return (lead_map2(np.load(img_file, mmap_mode="r")[i]) * 255).astype(np.uint8)
+
+
+def lead_cache(img_file):
+    """lead_map2 of every cached training image (uint8), computed once on all CPU cores.
+    Detection is the slow part of snap_to_lead2 and depends only on the picture."""
+    path = img_file.replace("images_", "leadmaps_")
+    if not os.path.exists(path):
+        imgs = np.load(img_file, mmap_mode="r")
+        n, size = len(imgs), imgs.shape[1]
+        print(f"finding lead lines in {n} images (once for this set of images)", flush=True)
+        tmp = path + ".part"
+        arr = np.lib.format.open_memmap(tmp, "w+", np.uint8, (n, size, size))
+        import multiprocessing as mp
+        with mp.Pool(os.cpu_count()) as pool:
+            for i, m in enumerate(pool.imap(_leadmap_job, [(img_file, i) for i in range(n)], 16)):
+                arr[i] = m
+        arr.flush()
+        del arr
+        os.replace(tmp, path)
+    return path
+
+
 class ShatterDataset(Dataset):
     """Every access shatters a random window along a random crack pattern."""
 
-    def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0):
+    def __init__(self, paths, samples_per_epoch=4000, augment=True, lead=0.0, lead_method=2):
         self.img_file = image_cache(paths, SIZE)
+        self.lead_method = lead_method
+        self.lead_file = lead_cache(self.img_file) if lead > 0 and lead_method == 2 else None
+        self._leads = None
         crack_pool()                     # make sure the crack file exists
         self.pool_file = pool_path()
         self._imgs = self._pool = None   # opened lazily, once per worker process
@@ -127,22 +162,30 @@ class ShatterDataset(Dataset):
         return self.n
 
     def __getstate__(self):
-        return {**self.__dict__, "_imgs": None, "_pool": None}
+        return {**self.__dict__, "_imgs": None, "_pool": None, "_leads": None}
 
     def __getitem__(self, i):
         if self._imgs is None:
             self._imgs = np.load(self.img_file, mmap_mode="r")
             self._pool = np.load(self.pool_file, mmap_mode="r")
+            if self.lead_file:
+                self._leads = np.load(self.lead_file, mmap_mode="r")
         rng = np.random.default_rng()
-        img = np.array(self._imgs[rng.integers(len(self._imgs))])
+        idx = rng.integers(len(self._imgs))
+        img = np.array(self._imgs[idx])
+        flip = self.augment and rng.random() < 0.5
+        if flip:
+            img = img[:, ::-1]
         if self.augment:
-            if rng.random() < 0.5:
-                img = img[:, ::-1]
             img = np.clip(img * rng.uniform(0.8, 1.2, (1, 1, 3)), 0, 255).astype(np.uint8)
         img = np.ascontiguousarray(img)
         labels = random_cracks(self._pool, rng)
         if rng.random() < self.lead:
-            labels = snap_to_lead(img, labels, rng=rng)
+            leadmap = None
+            if self._leads is not None:
+                leadmap = self._leads[idx][:, ::-1] if flip else self._leads[idx]
+                leadmap = np.ascontiguousarray(leadmap, dtype=np.float32) / 255
+            labels = snap(img, labels, rng, self.lead_method, leadmap)
         s = render_shards(img, labels, self.crop, TILE, rng=rng)
         return s["tiles"], s["centers"], s["angles"]
 
@@ -229,18 +272,20 @@ def angle_err_deg(cs, angles):
 
 
 @torch.no_grad()
-def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0):
+def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method=2, leadmaps=None):
     model.eval()
+    if lead > 0 and lead_method == 2 and leadmaps is None:
+        leadmaps = [lead_map2(img) for img in imgs]
     dev = next(model.parameters()).device
     rng = np.random.default_rng(seed)
     ok = tot = perfect = runs = 0
     rot_errs = []
-    for img in imgs:
+    for j, img in enumerate(imgs):
         for _ in range(trials):
             k = int(rng.integers(KMIN, KMAX + 1))
             labels = break_image(SIZE, SIZE, k, rng)
             if rng.random() < lead:
-                labels = snap_to_lead(img, labels, rng=rng)
+                labels = snap(img, labels, rng, lead_method, leadmaps[j] if leadmaps else None)
             s = render_shards(img, labels, CROP, TILE, rng=rng)
             xy, cs = model(torch.from_numpy(s["tiles"])[None].to(dev),
                            torch.zeros(1, len(s["tiles"]), dtype=torch.bool, device=dev))
@@ -276,11 +321,14 @@ def train(a):
     rng.shuffle(val_paths)
     print(f"{len(tr_paths)} training images, {len(val_paths)} held-out images, on {dev}")
 
-    ds = ShatterDataset(tr_paths, a.samples, lead=a.lead)
+    ds = ShatterDataset(tr_paths, a.samples, lead=a.lead, lead_method=a.lead_method)
     dl = DataLoader(ds, batch_size=a.batch, collate_fn=collate,
                     num_workers=a.workers, persistent_workers=a.workers > 0,
                     pin_memory=dev.type == "cuda")
     val_imgs = [load_image(p) for p in val_paths[:40]]
+    need_maps = a.lead > 0 and a.lead_method == 2
+    val_maps = [lead_map2(i) for i in val_imgs] if need_maps else None
+    ev = dict(lead=a.lead, lead_method=a.lead_method)
 
     model = ShardSolver().to(dev)
     if a.resume and os.path.exists(a.ckpt):
@@ -294,7 +342,7 @@ def train(a):
     best = -1
     if a.resume and os.path.exists(a.ckpt):
         # don't let a weak early epoch overwrite the model we resumed from
-        best = evaluate_model(model, val_imgs, trials=2, seed=0, lead=a.lead)["shard_acc"]
+        best = evaluate_model(model, val_imgs, trials=2, seed=0, leadmaps=val_maps, **ev)["shard_acc"]
         print(f"starting point: held-out shards placed {best:.1%}")
     top = []   # (score, epoch, path) of the a.keep best epochs so far
     stem = os.path.splitext(a.ckpt)[0]
@@ -320,7 +368,7 @@ def train(a):
                 sched.step()
             step += 1
             lp += l_pos.item(); lr_ += l_rot.item()
-        m = evaluate_model(model, val_imgs, trials=2, seed=ep, lead=a.lead)
+        m = evaluate_model(model, val_imgs, trials=2, seed=ep, leadmaps=val_maps, **ev)
         mins = (time.time() - t0) / 60
         print(f"ep {ep:3d} [{mins:5.1f} min] pos {lp / len(dl):.4f} rot {lr_ / len(dl):.3f} | "
               f"held-out: shards placed {m['shard_acc']:.1%}, perfect windows {m['perfect']:.0%}, "
@@ -344,12 +392,13 @@ def train(a):
         # the per-epoch score uses few shatterings and is noisy; re-test the
         # top epochs on every held-out image, more times, and keep the real best
         imgs = [load_image(p) for p in val_paths]
+        maps = [lead_map2(i) for i in imgs] if need_maps else None
         print(f"re-testing the top {len(top)} epochs on {len(imgs)} held-out images "
               f"x {a.final_trials} shatterings:")
         scores = []
         for _, ep, path in sorted(top, key=lambda t: t[1]):
             model.load_state_dict(torch.load(path, weights_only=True, map_location=dev))
-            m = evaluate_model(model, imgs, trials=a.final_trials, seed=12345, lead=a.lead)
+            m = evaluate_model(model, imgs, trials=a.final_trials, seed=12345, leadmaps=maps, **ev)
             scores.append((m["shard_acc"], ep, path))
             print(f"  ep {ep:3d}: shards placed {m['shard_acc']:.1%}, perfect windows "
                   f"{m['perfect']:.1%}, rot median {m['rot_median']:.0f}°  ({path})", flush=True)
@@ -437,7 +486,7 @@ def evaluate(a):
     model = ShardSolver().to(dev)
     model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=dev))
     imgs = [load_image(p) for p in list_images(a.images)[:a.n]]
-    m = evaluate_model(model, imgs, trials=a.trials, lead=a.lead)
+    m = evaluate_model(model, imgs, trials=a.trials, lead=a.lead, lead_method=a.lead_method)
     print(f"{len(imgs)} windows x {a.trials} shatterings")
     print(f"  shards in correct place : {m['shard_acc']:.1%}")
     print(f"  fully correct windows   : {m['perfect']:.1%}")
@@ -473,6 +522,8 @@ def main():
     for p in (t, e):
         p.add_argument("--lead", type=float, default=0.0,
                        help="fraction of breaks whose cracks follow the lead lines (0-1)")
+        p.add_argument("--lead-method", type=int, default=2, choices=(1, 2),
+                       help="1 = original snap_to_lead, 2 = snap_to_lead2 (stricter lead detection)")
     for p in (t, d, e):
         p.add_argument("--ckpt", default="checkpoints/shards.pt")
         p.add_argument("--size", type=int, default=SIZE, help="window is resized to this")

@@ -75,8 +75,30 @@ def lead_map(img: np.ndarray) -> np.ndarray:
     return gaussian_filter(m, 0.8)
 
 
+def lead_map2(img: np.ndarray, min_len_frac=0.06) -> np.ndarray:
+    """0..1 map of lead cames, stricter than lead_map: a ridge filter keeps only dark
+    *line-shaped* structures of came width (so dark glass isn't counted), and only
+    long connected networks survive (so short paint strokes and texture drop out)."""
+    from scipy.ndimage import gaussian_filter
+    from skimage.filters import sato
+    from skimage.morphology import skeletonize
+    g = img.astype(np.float32).mean(2) / 255.0
+    s = min(g.shape)
+    r = sato(g, sigmas=[max(1.0, s * f) for f in (0.004, 0.007, 0.011)], black_ridges=True)
+    r = r / (np.percentile(r, 99.5) + 1e-6)
+    m = r > 0.18
+    lab, n = cc_label(m, structure=np.ones((3, 3)))
+    if n:
+        length = np.bincount(lab[skeletonize(m)], minlength=n + 1)
+        keep = length >= min_len_frac * s
+        keep[0] = False
+        m = keep[lab]
+    out = gaussian_filter(np.clip(r, 0, 1) * m, 1.0)
+    return out / (out.max() + 1e-6)
+
+
 def snap_to_lead(img: np.ndarray, labels: np.ndarray, band_frac=0.045,
-                 rng=None) -> np.ndarray:
+                 rng=None, lead_fn=None, noise=0.05) -> np.ndarray:
     """Move crack lines onto nearby lead lines.
 
     The random cracks from break_image() are kept as a rough plan. Each shard's
@@ -108,8 +130,8 @@ def snap_to_lead(img: np.ndarray, labels: np.ndarray, band_frac=0.045,
         sl = (slice(max(0, y - r), y + r + 1), slice(max(0, x - r), x + r + 1))
         markers[sl][labels[sl] == i] = i + 1
     # elevation: high on lead; smooth noise so cracks through plain glass wander
-    noise = gaussian_filter(rng.normal(0, 1, labels.shape), 1.5)
-    elev = lead_map(img) + 0.05 * noise.astype(np.float32) / (noise.std() + 1e-6)
+    wobble = gaussian_filter(rng.normal(0, 1, labels.shape), 1.5)
+    elev = (lead_fn or lead_map)(img) + noise * wobble.astype(np.float32) / (wobble.std() + 1e-6)
     # a gentle pull back toward the original crack keeps shard sizes balanced
     elev += 0.15 * (1 - np.clip(dist / band, 0, 1))
     out = watershed(elev, markers)
@@ -153,3 +175,11 @@ def render_shards(img: np.ndarray, labels: np.ndarray, crop: int, out: int,
                 centers=np.array(centers, np.float32),
                 angles=np.array(angles, np.float32),
                 rgba=rgbas)
+
+
+def snap_to_lead2(img: np.ndarray, labels: np.ndarray, rng=None, leadmap=None) -> np.ndarray:
+    """snap_to_lead with the stricter lead_map2, a wider reach and less wobble, so
+    cracks follow the lead cames cleanly and run straighter through plain glass.
+    Pass a precomputed lead_map2(img) as leadmap to skip the (slow) detection."""
+    fn = lead_map2 if leadmap is None else (lambda _: leadmap)
+    return snap_to_lead(img, labels, band_frac=0.07, rng=rng, lead_fn=fn, noise=0.015)
