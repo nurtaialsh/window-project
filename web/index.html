@@ -119,7 +119,6 @@
         <button id="go" class="primary" disabled>shatter &amp; solve</button>
         <button id="again" class="quiet" disabled>break again</button>
       </div>
-      <p class="hint">best with about as many shards as the model was trained on (v6: 10–16).</p>
       <div id="err"></div>
     </div>
   </section>
@@ -180,7 +179,7 @@ async function load(file) {
       wrap.appendChild(b);
     });
     $("pickhint").textContent = panes.length > 1
-      ? `Found ${panes.length} panes. Click one to shatter it (the network was trained on single panes).`
+      ? `Found ${panes.length} panes. Click one to shatter it.`
       : "Looks like a single pane — the whole image will be used.";
     if (panes.length > 1) select(0);
   } catch (e) { $("pickhint").textContent = "Couldn't find panes; the whole image will be used."; }
