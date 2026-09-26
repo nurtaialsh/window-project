@@ -31,7 +31,8 @@ from split_panes import build_parser as pane_options, split_image
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SCALE = 3          # shards are drawn at SCALE x the size the network works at
-BLACK_LO, BLACK_HI = 22, 48   # grey levels: fully see-through below LO, solid above HI
+BLACK = 24         # grey level below which a pixel is see-through in the displayed shards
+LEAD_MAX = 90      # ...and on a detected lead came, anything darker than this
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -84,9 +85,10 @@ def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles,
         # for display only: near-black (lead lines, dark edges) fades to transparent,
         # so each shard reads as a loose piece of glass
         lum = rgb.astype(np.float32).mean(2)
-        m *= np.clip((lum - BLACK_LO) / (BLACK_HI - BLACK_LO), 0, 1)
-        if lead is not None:                     # and the detected lead cames
-            m *= np.clip(1 - 1.6 * lead_p[y0:y0 + crop, x0:x0 + crop], 0, 1)
+        clear = lum < BLACK                      # truly black
+        if lead is not None:                     # or a dark pixel on a detected lead came
+            clear |= (lead_p[y0:y0 + crop, x0:x0 + crop] > 0.45) & (lum < LEAD_MAX)
+        m *= ~clear                              # all or nothing: glass stays fully solid
         im = Image.fromarray(np.dstack([rgb, (m * 255).astype(np.uint8)]), "RGBA")
         out.append(np.array(im.rotate(np.degrees(ang), resample=Image.BICUBIC)))
     return out
