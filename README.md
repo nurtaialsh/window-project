@@ -32,7 +32,9 @@ Drop in a window photo; multi-light windows are split into panes you can click. 
 network shatters the pane, and the page animates each shard flying to the hole the
 network chose, turned by the angle it predicted, with the score underneath. It uses
 `checkpoints/model_v7_leadonly_10-16shards.pt` by default (`--ckpt` for another; pass
-`--size/--crop` if that one was trained with different settings).
+`--size/--crop` if that one was trained with different settings). Every
+`checkpoints/model_v<N>_*.pt` appears in a version selector; switching version after a solve
+re-solves the *same* break, to show how each version does on identical shards.
 
 ## Sorting scraped photos
     python review_images.py --images data/more     # then open http://localhost:8001

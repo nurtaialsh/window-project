@@ -82,13 +82,56 @@ def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles,
     return out
 
 
+# one-line notes shown in the version selector, by version number
+NOTES = {
+    1: "synthetic windows only",
+    2: "first real panes, trained on a laptop CPU",
+    3: "GPU, 40 epochs",
+    4: "GPU, 300 epochs",
+    5: "overnight, scraped windows added",
+    6: "after a cool-down",
+    7: "trained on lead-only breaks",
+    8: "20–28 shards",
+}
+
+
+def find_models(default_ckpt):
+    """checkpoints/model_v<N>_*.pt, sorted by N, plus the --ckpt file if it isn't one."""
+    import glob
+    import re
+    found = {}
+    for path in glob.glob(os.path.join(ROOT, "checkpoints", "model_v*.pt")):
+        m = re.match(r"model_v(\d+)", os.path.basename(path))
+        if m:
+            found.setdefault(int(m.group(1)), path)
+    models = [dict(id=f"v{n}", label=f"v{n}", note=NOTES.get(n, os.path.basename(p)), path=p)
+              for n, p in sorted(found.items())]
+    default = next((m["id"] for m in models
+                    if os.path.abspath(m["path"]) == os.path.abspath(default_ckpt)), None)
+    if default is None and os.path.exists(default_ckpt):
+        models.append(dict(id="custom", label=os.path.splitext(os.path.basename(default_ckpt))[0],
+                           note="--ckpt", path=default_ckpt))
+        default = "custom"
+    return models, default or (models[-1]["id"] if models else None)
+
+
 class Solver:
     def __init__(self, a):
         self.dev = ss.device(a)
-        self.model = ss.ShardSolver().to(self.dev)
-        self.model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=self.dev))
-        self.model.eval()
+        self.models, self.default = find_models(a.ckpt)
+        if not self.models:
+            raise SystemExit(f"no model found: put checkpoints/model_v*.pt in place or pass --ckpt")
+        self.loaded = {}
         self.pane_opts = pane_options().parse_args([])
+
+    def model(self, mid=None):
+        mid = mid if any(m["id"] == mid for m in self.models) else self.default
+        if mid not in self.loaded:
+            path = next(m["path"] for m in self.models if m["id"] == mid)
+            net = ss.ShardSolver().to(self.dev)
+            net.load_state_dict(torch.load(path, weights_only=True, map_location=self.dev))
+            self.loaded[mid] = net.eval()
+        return mid, self.loaded[mid]
 
     def panes(self, data: bytes):
         img = np.array(Image.open(io.BytesIO(data)).convert("RGB"))
@@ -99,8 +142,11 @@ class Solver:
                            for y0, y1, x0, x1 in boxes])
 
     @torch.no_grad()
-    def solve(self, data: bytes, pieces: int, seed: int | None, lead: bool):
+    def solve(self, data: bytes, pieces: int, seed: int | None, lead: int, model_id=None):
         size, crop = ss.SIZE, ss.CROP
+        mid, model = self.model(model_id)
+        if seed is None:
+            seed = int(np.random.default_rng().integers(2 ** 31))
         rng = np.random.default_rng(seed)
         pil = Image.open(io.BytesIO(data)).convert("RGB")
         img = np.array(pil.resize((size, size), Image.BICUBIC))
@@ -112,7 +158,7 @@ class Solver:
             labels = snap_to_lead2(img, labels, rng=rng)
         s = render_shards(img, labels, crop, ss.TILE, rng=rng)
         K = len(s["tiles"])
-        xy, cs = self.model(torch.from_numpy(s["tiles"])[None].to(self.dev),
+        xy, cs = model(torch.from_numpy(s["tiles"])[None].to(self.dev),
                             torch.zeros(1, K, dtype=torch.bool, device=self.dev))
         xy, cs = xy[0].cpu().numpy(), cs[0].cpu().numpy()
         slot = ss.assign(xy, s["centers"])
@@ -140,7 +186,7 @@ class Solver:
                          angle=float(s["angles"][i]), pred_angle=float(pred[i]),
                          rot_err=float(rot_err[i]), correct=bool(slot[i] == i))
                     for i in range(K)],
-            correct=correct, total=K, rot_median=float(np.median(rot_err)),
+            correct=correct, total=K, rot_median=float(np.median(rot_err)), seed=seed, model=mid,
             rot_within_15=float((rot_err < 15).mean()))
 
 
@@ -157,6 +203,10 @@ def make_handler(solver: Solver):
             self._send(code, json.dumps(obj).encode(), "application/json")
 
         def do_GET(self):
+            if urlparse(self.path).path == "/api/models":
+                return self._json(dict(default=solver.default,
+                                       models=[{k: m[k] for k in ("id", "label", "note")}
+                                               for m in solver.models]))
             if urlparse(self.path).path in ("/", "/index.html"):
                 with open(os.path.join(ROOT, "web", "index.html"), "rb") as f:
                     self._send(200, f.read(), "text/html; charset=utf-8")
@@ -177,7 +227,7 @@ def make_handler(solver: Solver):
                     pieces = min(max(int(q.get("pieces", 12)), 4), 48)
                     seed = int(q["seed"]) if q.get("seed") else None
                     lead = {"1": 1, "2": 2}.get(q.get("lead"), 0)   # 0 random, 1 original, 2 improved
-                    return self._json(solver.solve(data, pieces, seed, lead))
+                    return self._json(solver.solve(data, pieces, seed, lead, q.get("model")))
                 self._json({"error": "unknown endpoint"}, 404)
             except Exception as e:  # bad image etc. - report it on the page
                 self._json({"error": f"{type(e).__name__}: {e}"}, 400)
@@ -199,7 +249,8 @@ def main():
     a = ap.parse_args()
     ss.SIZE, ss.CROP = a.size, a.crop
     solver = Solver(a)
-    print(f"model {a.ckpt} on {solver.dev} — open http://localhost:{a.port}")
+    names = ", ".join(m["label"] for m in solver.models)
+    print(f"models: {names} (default {solver.default}) on {solver.dev} — open http://localhost:{a.port}")
     HTTPServer((a.host, a.port), make_handler(solver)).serve_forever()
 
 

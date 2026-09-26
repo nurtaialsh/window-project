@@ -114,6 +114,9 @@
       <h2><i>ii.</i> break</h2>
       <div class="field"><label for="pieces">shards</label>
         <input id="pieces" type="range" min="6" max="48" value="12"><output id="piecesv">12</output></div>
+      <div class="field"><label>model</label>
+        <div class="seg" id="models" role="radiogroup"></div></div>
+      <p class="hint" id="modelnote" style="margin:-8px 0 16px 84px"></p>
       <div class="field"><label>cracks</label>
         <div class="seg" id="lead" role="radiogroup">
           <button type="button" data-v="0">random</button>
@@ -222,14 +225,39 @@ document.querySelectorAll("#lead button").forEach(b => b.onclick = () => {
 $("go").onclick = () => solve();
 $("again").onclick = () => solve();
 
-async function solve() {
+// ── model versions: switching after a solve re-solves the *same* break ──
+let models = [], modelId = null, lastSeed = null;
+async function loadModels() {
+  const r = await (await fetch("/api/models")).json();
+  models = r.models;
+  const box = $("models");
+  box.innerHTML = "";
+  for (const m of models) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = m.label; b.title = m.note; b.dataset.id = m.id;
+    b.onclick = () => { pickModel(m.id); if (result) solve(true); };
+    box.appendChild(b);
+  }
+  pickModel(r.default);
+}
+function pickModel(id) {
+  modelId = id;
+  document.querySelectorAll("#models button").forEach(b => b.classList.toggle("on", b.dataset.id === id));
+  const m = models.find(m => m.id === id);
+  $("modelnote").textContent = m ? m.note : "";
+}
+loadModels();
+
+async function solve(sameBreak = false) {
   if (!srcImg) return;
   $("err").textContent = "";
   $("go").disabled = $("again").disabled = true;
   $("caption").textContent = "Breaking the pane and asking the network…";
   try {
-    const q = new URLSearchParams({ pieces: $("pieces").value, lead: leadMode });
+    const q = new URLSearchParams({ pieces: $("pieces").value, lead: leadMode, model: modelId });
+    if (sameBreak && lastSeed !== null) q.set("seed", lastSeed);
     result = await post("/api/solve?" + q, await paneBlob());
+    lastSeed = result.seed;
     await prepare(result);
     showStats(result);
     play();
@@ -344,9 +372,10 @@ function play() {
   };
   const done = () => {
     frame(2, 1);
-    $("caption").textContent = result.correct === result.total
-      ? `Every one of the ${result.total} shards is back in its place.`
-      : `${result.correct} of ${result.total} shards returned to their place.`;
+    const who = (models.find(m => m.id === result.model) || {}).label || "";
+    $("caption").textContent = (who ? who + ": " : "") + (result.correct === result.total
+      ? `every one of the ${result.total} shards is back in its place.`
+      : `${result.correct} of ${result.total} shards returned to their place.`);
   };
   anim = requestAnimationFrame(tick);
 }
