@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import torch
 from PIL import Image
+from scipy.ndimage import binary_erosion
 
 import shard_solver as ss
 from shards import break_image, lead_map2, render_shards, snap_to_lead, snap_to_lead2
@@ -33,6 +34,9 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SCALE = 3          # shards are drawn at SCALE x the size the network works at
 BLACK = 24         # grey level below which a pixel is see-through in the displayed shards
 LEAD_MAX = 90      # ...and on a detected lead came, anything darker than this
+LEAD_RGB = (22, 22, 22)   # colour of the lead border drawn round each shard
+RIM = 3                   # its width in display pixels
+_DISK = np.hypot(*np.mgrid[-RIM:RIM + 1, -RIM:RIM + 1]) <= RIM
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -89,6 +93,12 @@ def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles,
         if lead is not None:                     # or a dark pixel on a detected lead came
             clear |= (lead_p[y0:y0 + crop, x0:x0 + crop] > 0.45) & (lum < LEAD_MAX)
         m *= ~clear                              # all or nothing: glass stays fully solid
+        # a dark came around the outside of every shard, like lead holding the glass
+        shape = lab_p[y0:y0 + crop, x0:x0 + crop] == i
+        rim = shape & ~binary_erosion(shape, structure=_DISK, border_value=0)
+        rgb = rgb.copy()
+        rgb[rim] = LEAD_RGB
+        m[rim] = 1
         im = Image.fromarray(np.dstack([rgb, (m * 255).astype(np.uint8)]), "RGBA")
         out.append(np.array(im.rotate(np.degrees(ang), resample=Image.BICUBIC)))
     return out
