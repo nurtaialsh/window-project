@@ -7,7 +7,7 @@
 <link rel="icon" href="data:,">
 <style>
   :root {
-    --bg: #0b0b0b; --raise: #151515; --line: rgba(255, 255, 255, .12); --line-strong: rgba(255, 255, 255, .28);
+    --bg: #000000; --raise: #151515; --line: rgba(255, 255, 255, .12); --line-strong: rgba(255, 255, 255, .28);
     --text: #f2f2f2; --muted: #8e8e8e; --faint: #5e5e5e;
     --accent: #f2f2f2; --good: #ffffff; --bad: #bdbdbd;
     --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -302,7 +302,7 @@ function frame(t) {
   const D = result.size;
   ctx.clearRect(0, 0, D + 2 * M, D + 2 * M);
   if (peeking) { ctx.drawImage(layers.image, M, M, D, D); return; }
-  ctx.fillStyle = "#161616";
+  ctx.fillStyle = "#000000";
   ctx.fillRect(M, M, D, D);
   const e = ease(t);
   sprites.forEach(sp => drawSprite(sp, lerpPose(sp.scatter, sp.hole, e)));

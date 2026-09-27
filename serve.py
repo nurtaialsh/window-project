@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import torch
 from PIL import Image
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import binary_dilation, binary_erosion, binary_opening
 
 import shard_solver as ss
 from shards import break_image, lead_map2, render_shards, snap_to_lead, snap_to_lead2
@@ -34,9 +34,10 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SCALE = 3          # shards are drawn at SCALE x the size the network works at
 BLACK = 24         # grey level below which a pixel is see-through in the displayed shards
 LEAD_MAX = 90      # ...and on a detected lead came, anything darker than this
-LEAD_RGB = (22, 22, 22)   # colour of the lead border drawn round each shard
+LEAD_RGB = (55, 55, 55)   # colour of the lead drawn round each piece of glass
 RIM = 3                   # its width in display pixels
 _DISK = np.hypot(*np.mgrid[-RIM:RIM + 1, -RIM:RIM + 1]) <= RIM
+_SPECK = np.hypot(*np.mgrid[-2:3, -2:3]) <= 2   # see-through spots smaller than this stay glass
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -92,10 +93,14 @@ def display_shards(big: np.ndarray, labels: np.ndarray, lab: np.ndarray, angles,
         clear = lum < BLACK                      # truly black
         if lead is not None:                     # or a dark pixel on a detected lead came
             clear |= (lead_p[y0:y0 + crop, x0:x0 + crop] > 0.45) & (lum < LEAD_MAX)
+        clear = binary_opening(clear, structure=_SPECK)   # ignore specks, keep real lines
         m *= ~clear                              # all or nothing: glass stays fully solid
-        # a dark came around the outside of every shard, like lead holding the glass
+        # lead around every remaining piece of glass (where the black was removed)
+        # and along the shard's outline
         shape = lab_p[y0:y0 + crop, x0:x0 + crop] == i
-        rim = shape & ~binary_erosion(shape, structure=_DISK, border_value=0)
+        glass = m > 0                            # what is left after the black is removed
+        rim = (shape & ~glass & binary_dilation(glass, structure=_DISK)) \
+            | (shape & ~binary_erosion(shape, structure=_DISK, border_value=0))
         rgb = rgb.copy()
         rgb[rim] = LEAD_RGB
         m[rim] = 1
