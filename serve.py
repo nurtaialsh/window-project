@@ -185,12 +185,8 @@ class Solver:
             labels = snap_to_lead2(img, labels, rng=rng)
         s = render_shards(img, labels, crop, ss.TILE, rng=rng)
         K = len(s["tiles"])
-        xy, cs = model(torch.from_numpy(s["tiles"])[None].to(self.dev),
-                            torch.zeros(1, K, dtype=torch.bool, device=self.dev))
-        xy, cs = xy[0].cpu().numpy(), cs[0].cpu().numpy()
-        slot = ss.assign(xy, s["centers"])
-        pred = np.arctan2(cs[:, 1], cs[:, 0])
-        rot_err = ss.angle_err_deg(cs, s["angles"])
+        slot, pred = ss.solve_best(model, s)     # 16 attempts, keep the best-filled square
+        rot_err = ss.angle_err_deg(np.stack([np.cos(pred), np.sin(pred)], 1), s["angles"])
         big_lab = smooth_upscale(labels)
         lead_big = np.asarray(Image.fromarray(lead_map2(img).astype(np.float32))
                               .resize((size * SCALE, size * SCALE), Image.BILINEAR))

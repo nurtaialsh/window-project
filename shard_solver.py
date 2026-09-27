@@ -268,6 +268,70 @@ def assign(pred_xy, hole_xy):
     return out
 
 
+@torch.no_grad()
+def candidates(model, tiles, n_drop=8):
+    """Several attempts at one puzzle, each as (xy, angle) in the original frame:
+    the shards seen turned by 0/90/180/270 degrees, with and without a mirror
+    (8 views, predictions mapped back), plus n_drop runs with dropout switched on."""
+    dev = next(model.parameters()).device
+    t = torch.from_numpy(tiles)[None].to(dev)
+    pad = torch.zeros(1, t.shape[1], dtype=torch.bool, device=dev)
+
+    def run(x, k, flip):
+        xy, cs = model(x, pad)
+        xy, cs = xy[0].cpu().numpy().copy(), cs[0].cpu().numpy()
+        ang = np.arctan2(cs[:, 1], cs[:, 0]) - k * np.pi / 2
+        if flip:
+            xy[:, 0] = 1 - xy[:, 0]
+            ang = -ang
+        return xy, ang
+
+    model.eval()
+    out = []
+    for flip in (False, True):
+        tf = torch.flip(t, dims=[4]) if flip else t
+        for k in range(4):
+            out.append(run(torch.rot90(tf, k, dims=(3, 4)), k, flip))
+    drops = [mod for mod in model.modules() if isinstance(mod, nn.Dropout)]
+    for d in drops:
+        d.train()
+    try:
+        for _ in range(n_drop):
+            out.append(run(t, 0, False))
+    finally:
+        for d in drops:
+            d.eval()
+    return out
+
+
+def fill_score(masks, holes, slot, ang, size, crop):
+    """How neatly an attempt fills the square: each shard's own shape, turned back by
+    its predicted angle and put in its assigned hole. Share of the square covered
+    exactly once, minus overlaps and anything spilling outside. Needs no answer key."""
+    occ = np.zeros((size + crop, size + crop), np.int16)
+    p = crop // 2
+    for i in range(len(slot)):
+        im = Image.fromarray(masks[i]).rotate(-np.degrees(ang[i]), resample=Image.NEAREST)
+        cx, cy = holes[slot[i]] * size
+        x0, y0 = int(round(cx)), int(round(cy))
+        occ[y0:y0 + crop, x0:x0 + crop] += np.asarray(im) > 127
+    sq = occ[p:p + size, p:p + size]
+    return (sq == 1).mean() - (sq >= 2).mean() - (occ.sum() - sq.sum()) / size ** 2
+
+
+def solve_best(model, s, n_drop=8):
+    """Try candidates() and keep the attempt that fills the square best.
+    Returns (slot, angle) for each shard."""
+    masks = [r[..., 3] for r in s["rgba"]]
+    best = None
+    for xy, ang in candidates(model, s["tiles"], n_drop):
+        slot = assign(xy, s["centers"])
+        sc = fill_score(masks, s["centers"], slot, ang, SIZE, CROP)
+        if best is None or sc > best[0]:
+            best = (sc, slot, ang)
+    return best[1], best[2]
+
+
 def angle_err_deg(cs, angles):
     pred = np.arctan2(cs[:, 1], cs[:, 0])
     d = np.abs((pred - angles + np.pi) % (2 * np.pi) - np.pi)
@@ -275,7 +339,8 @@ def angle_err_deg(cs, angles):
 
 
 @torch.no_grad()
-def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method="2", leadmaps=None):
+def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method="2", leadmaps=None,
+                   best_of=False):
     model.eval()
     if lead > 0 and lead_method != "1" and leadmaps is None:
         leadmaps = [lead_map2(img) for img in imgs]
@@ -290,6 +355,13 @@ def evaluate_model(model, imgs, trials=3, seed=0, lead=0.0, lead_method="2", lea
             if rng.random() < lead:
                 labels = snap(img, labels, rng, lead_method, leadmaps[j] if leadmaps else None)
             s = render_shards(img, labels, CROP, TILE, rng=rng)
+            if best_of:
+                a, ang = solve_best(model, s)
+                hits = (a == np.arange(len(a)))
+                ok += hits.sum(); tot += len(a); perfect += hits.all(); runs += 1
+                rot_errs += list(angle_err_deg(np.stack([np.cos(ang), np.sin(ang)], 1), s["angles"]))
+                model.eval()
+                continue
             xy, cs = model(torch.from_numpy(s["tiles"])[None].to(dev),
                            torch.zeros(1, len(s["tiles"]), dtype=torch.bool, device=dev))
             a = assign(xy[0].cpu().numpy(), s["centers"])
@@ -489,7 +561,8 @@ def evaluate(a):
     model = ShardSolver().to(dev)
     model.load_state_dict(torch.load(a.ckpt, weights_only=True, map_location=dev))
     imgs = [load_image(p) for p in list_images(a.images)[:a.n]]
-    m = evaluate_model(model, imgs, trials=a.trials, lead=a.lead, lead_method=a.lead_method)
+    m = evaluate_model(model, imgs, trials=a.trials, lead=a.lead, lead_method=a.lead_method,
+                       best_of=a.best_of)
     print(f"{len(imgs)} windows x {a.trials} shatterings")
     print(f"  shards in correct place : {m['shard_acc']:.1%}")
     print(f"  fully correct windows   : {m['perfect']:.1%}")
@@ -522,6 +595,8 @@ def main():
     e.add_argument("--images", required=True)
     e.add_argument("--n", type=int, default=100)
     e.add_argument("--trials", type=int, default=3)
+    e.add_argument("--best-of", action="store_true",
+                   help="make 16 attempts per puzzle and keep the one that fills the square best")
     for p in (t, e):
         p.add_argument("--lead", type=float, default=0.0,
                        help="fraction of breaks whose cracks follow the lead lines (0-1)")
