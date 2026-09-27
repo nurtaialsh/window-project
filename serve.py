@@ -185,25 +185,39 @@ class Solver:
             labels = snap_to_lead2(img, labels, rng=rng)
         s = render_shards(img, labels, crop, ss.TILE, rng=rng)
         K = len(s["tiles"])
-        slot, pred = ss.solve_best(model, s)     # 16 attempts, keep the best-filled square
+        attempts, best = ss.solve_all(model, s)  # 16 attempts; best = the best-filled square
+        _, slot, pred = attempts[best]
         rot_err = ss.angle_err_deg(np.stack([np.cos(pred), np.sin(pred)], 1), s["angles"])
         big_lab = smooth_upscale(labels)
         lead_big = np.asarray(Image.fromarray(lead_map2(img).astype(np.float32))
                               .resize((size * SCALE, size * SCALE), Image.BILINEAR))
         shards = display_shards(big, labels, big_lab, s["angles"], crop * SCALE, lead_big)
 
-        wrong = np.zeros(big_lab.shape, bool)
-        for i in range(K):
-            if slot[i] != i:
-                wrong |= edges(big_lab == slot[i]) & (big_lab == slot[i])
-        wrong = np.maximum.reduce([np.roll(wrong, d, ax) for ax in (0, 1) for d in (-1, 0, 1)])
+        hole_edge = [edges(big_lab == h) & (big_lab == h) for h in range(K)]
+
+        def wrong_png(slot):
+            wrong = np.zeros(big_lab.shape, bool)
+            for i in range(K):
+                if slot[i] != i:
+                    wrong |= hole_edge[slot[i]]
+            wrong = np.maximum.reduce([np.roll(wrong, d, ax) for ax in (0, 1) for d in (-1, 0, 1)])
+            return png_url(overlay(wrong, (255, 255, 255)))
+
         correct = int((slot == np.arange(K)).sum())
         D = size * SCALE
+        cand = []
+        for fill, sl, an in attempts:
+            re = ss.angle_err_deg(np.stack([np.cos(an), np.sin(an)], 1), s["angles"])
+            cand.append(dict(fill=float(fill), correct=int((sl == np.arange(K)).sum()),
+                             holes=[[float(s["centers"][h][0] * D), float(s["centers"][h][1] * D)]
+                                    for h in sl],
+                             pred_angle=[float(x) for x in an], wrong=wrong_png(sl),
+                             rot_median=float(np.median(re)), rot_within_15=float((re < 15).mean())))
         return dict(
             size=D,
             image=png_url(big),
             cracks=png_url(overlay(edges(big_lab), (255, 255, 255))),
-            wrong=png_url(overlay(wrong, (255, 255, 255))),
+            wrong=cand[best]["wrong"], candidates=cand, best=best,
             shards=[dict(png=png_url(shards[i]),
                          home=[float(s["centers"][i][0] * D), float(s["centers"][i][1] * D)],
                          hole=[float(s["centers"][slot[i]][0] * D),

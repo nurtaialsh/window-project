@@ -73,6 +73,14 @@
   #stats { max-width: 780px; margin: 30px auto 0; display: grid; grid-template-columns: repeat(3, 1fr);
            border-top: 1px solid var(--line); }
   #stats[hidden] { display: none; }
+  #all { max-width: 780px; margin: 26px auto 0; display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+  #all[hidden] { display: none; }
+  #all figure { margin: 0; cursor: pointer; text-align: center; color: var(--muted); font-size: 12px; }
+  #all canvas { width: 100%; aspect-ratio: 1; display: block; outline: 1px solid transparent; }
+  #all figure.auto canvas { outline-color: var(--line-strong); }
+  #all figure.on canvas { outline: 1px solid var(--text); }
+  #all figure.on { color: var(--text); }
+  @media (max-width: 600px) { #all { grid-template-columns: repeat(4, 1fr); } }
   .stat { padding: 18px 8px 0; text-align: center; }
   .stat + .stat { border-left: 1px solid var(--line); }
   .stat b { display: block; font: 300 34px/1.1 var(--sans); }
@@ -111,7 +119,9 @@
       <button class="quiet" id="mistakes" disabled>mistakes</button>
       <button class="quiet" id="peek" disabled>original</button>
       <button class="quiet" id="cracksbtn">cracks</button>
+      <button class="quiet" id="allbtn" disabled>all</button>
     </div>
+    <div id="all" hidden></div>
     <div id="stats" hidden>
       <div class="stat"><b id="s1">–</b><span>placed</span></div>
       <div class="stat"><b id="s2">–</b><span>turn error</span></div>
@@ -249,7 +259,48 @@ async function prepare(r) {
       scatter: [(k % cols + .5) * cell + jitter(), (Math.floor(k / cols) + .5) * cell + jitter(), 0],
       hole:    [s.hole[0], s.hole[1], s.pred_angle] };
   });
-  ["replay", "mistakes", "peek"].forEach(id => $(id).disabled = false);
+  ["replay", "mistakes", "peek", "allbtn"].forEach(id => $(id).disabled = false);
+  wrongImgs = await Promise.all(r.candidates.map(c => loadImg(c.wrong)));
+  current = r.best;
+  buildAll();
+}
+
+// ── all 16 attempts: previews; clicking one makes it the result ──
+let wrongImgs = [], current = 0;
+function drawAttempt(c2, cand) {
+  const D = result.size, s = c2.width / (D + 2 * M), x = c2.getContext("2d");
+  x.setTransform(s, 0, 0, s, 0, 0);
+  x.fillStyle = "#000"; x.fillRect(0, 0, D + 2 * M, D + 2 * M);
+  sprites.forEach((sp, j) => {
+    const w = sp.img.width;
+    x.save(); x.translate(M + cand.holes[j][0], M + cand.holes[j][1]); x.rotate(cand.pred_angle[j]);
+    x.drawImage(sp.img, -w / 2, -w / 2, w, w); x.restore();
+  });
+}
+function buildAll() {
+  const box = $("all");
+  box.innerHTML = "";
+  result.candidates.forEach((cand, i) => {
+    const f = document.createElement("figure");
+    f.className = (i === result.best ? "auto " : "") + (i === current ? "on" : "");
+    const c2 = document.createElement("canvas");
+    c2.width = c2.height = 200;
+    f.appendChild(c2);
+    f.appendChild(Object.assign(document.createElement("figcaption"), { textContent: `${cand.correct}/${result.total}` }));
+    f.onclick = () => useAttempt(i);
+    box.appendChild(f);
+    drawAttempt(c2, cand);
+  });
+}
+function useAttempt(i) {
+  current = i;
+  const cand = result.candidates[i];
+  sprites.forEach((sp, j) => sp.hole = [cand.holes[j][0], cand.holes[j][1], cand.pred_angle[j]]);
+  layers.wrong = wrongImgs[i];
+  showStats({ correct: cand.correct, total: result.total, rot_median: cand.rot_median,
+              rot_within_15: cand.rot_within_15 });
+  document.querySelectorAll("#all figure").forEach((f, j) => f.classList.toggle("on", j === i));
+  play();
 }
 
 function showStats(r) {
@@ -326,6 +377,10 @@ function play() {
 }
 
 $("replay").onclick = () => result && play();
+$("allbtn").onclick = () => {
+  $("all").hidden = !$("all").hidden;
+  $("allbtn").classList.toggle("on", !$("all").hidden);
+};
 let showCracks = false;
 $("cracksbtn").onclick = () => { showCracks = !showCracks; $("cracksbtn").classList.toggle("on", showCracks); };
 $("mistakes").onclick = () => {

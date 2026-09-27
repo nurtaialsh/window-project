@@ -269,35 +269,28 @@ def assign(pred_xy, hole_xy):
 
 
 @torch.no_grad()
-def candidates(model, tiles, n_drop=8):
+def candidates(model, tiles, n_drop=12):
     """Several attempts at one puzzle, each as (xy, angle) in the original frame:
-    the shards seen turned by 0/90/180/270 degrees, with and without a mirror
-    (8 views, predictions mapped back), plus n_drop runs with dropout switched on."""
+    the shards seen turned by 0/90/180/270 degrees (angles mapped back), plus n_drop
+    runs with dropout switched on. Mirrored views are left out: a mirrored shard fits
+    a mirror about any axis, and the model picks one inconsistently."""
     dev = next(model.parameters()).device
     t = torch.from_numpy(tiles)[None].to(dev)
     pad = torch.zeros(1, t.shape[1], dtype=torch.bool, device=dev)
 
-    def run(x, k, flip):
+    def run(x, k):
         xy, cs = model(x, pad)
-        xy, cs = xy[0].cpu().numpy().copy(), cs[0].cpu().numpy()
-        ang = np.arctan2(cs[:, 1], cs[:, 0]) - k * np.pi / 2
-        if flip:
-            xy[:, 0] = 1 - xy[:, 0]
-            ang = -ang
-        return xy, ang
+        xy, cs = xy[0].cpu().numpy(), cs[0].cpu().numpy()
+        return xy, np.arctan2(cs[:, 1], cs[:, 0]) - k * np.pi / 2
 
     model.eval()
-    out = []
-    for flip in (False, True):
-        tf = torch.flip(t, dims=[4]) if flip else t
-        for k in range(4):
-            out.append(run(torch.rot90(tf, k, dims=(3, 4)), k, flip))
+    out = [run(torch.rot90(t, k, dims=(3, 4)), k) for k in range(4)]
     drops = [mod for mod in model.modules() if isinstance(mod, nn.Dropout)]
     for d in drops:
         d.train()
     try:
         for _ in range(n_drop):
-            out.append(run(t, 0, False))
+            out.append(run(t, 0))
     finally:
         for d in drops:
             d.eval()
@@ -319,17 +312,21 @@ def fill_score(masks, holes, slot, ang, size, crop):
     return (sq == 1).mean() - (sq >= 2).mean() - (occ.sum() - sq.sum()) / size ** 2
 
 
-def solve_best(model, s, n_drop=8):
-    """Try candidates() and keep the attempt that fills the square best.
-    Returns (slot, angle) for each shard."""
+def solve_all(model, s, n_drop=12):
+    """Every attempt from candidates() as (fill score, slot, angle), plus the index
+    of the one that fills the square best."""
     masks = [r[..., 3] for r in s["rgba"]]
-    best = None
+    out = []
     for xy, ang in candidates(model, s["tiles"], n_drop):
         slot = assign(xy, s["centers"])
-        sc = fill_score(masks, s["centers"], slot, ang, SIZE, CROP)
-        if best is None or sc > best[0]:
-            best = (sc, slot, ang)
-    return best[1], best[2]
+        out.append((fill_score(masks, s["centers"], slot, ang, SIZE, CROP), slot, ang))
+    return out, int(np.argmax([c[0] for c in out]))
+
+
+def solve_best(model, s, n_drop=12):
+    """Keep the attempt that fills the square best. Returns (slot, angle) per shard."""
+    out, best = solve_all(model, s, n_drop)
+    return out[best][1], out[best][2]
 
 
 def angle_err_deg(cs, angles):
