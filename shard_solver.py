@@ -394,7 +394,7 @@ def train(a):
     if len(top) > 1:
         # the per-epoch score uses few shatterings and is noisy; re-test the
         # top epochs on every held-out image, more times, and keep the real best
-        imgs = [load_image(p) for p in val_paths]
+        imgs = [load_image(p) for p in val_paths if os.path.exists(p)]  # files may have moved
         maps = [lead_map2(i) for i in imgs] if need_maps else None
         print(f"re-testing the top {len(top)} epochs on {len(imgs)} held-out images "
               f"x {a.final_trials} shatterings:")
