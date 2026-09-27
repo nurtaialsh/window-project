@@ -119,46 +119,48 @@ def analyse(folder: str, cache_path: str):
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Photo Review</title><link rel="icon" href="data:,">
+<title>review</title><link rel="icon" href="data:,">
 <style>
-  :root { --bg:#111114; --panel:#1b1b20; --line:#2c2c34; --text:#ececf1; --muted:#9a9aa8; --bad:#ff5a5a; --accent:#e0b44c; }
+  :root { --bg:#0b0b0b; --line:rgba(255,255,255,.12); --text:#f2f2f2; --muted:#8e8e8e;
+          --sans:"Segoe UI", system-ui, -apple-system, sans-serif; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
-  header { position:sticky; top:0; z-index:2; background:rgba(17,17,20,.95); border-bottom:1px solid var(--line);
-           padding:12px 16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-  h1 { font-size:17px; margin:0 12px 0 0; }
-  .muted { color:var(--muted); }
-  button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px 12px; cursor:pointer; font-size:14px; }
-  button.on { border-color:var(--accent); color:var(--accent); }
-  button.go { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600; margin-left:auto; }
-  button:disabled { opacity:.4; cursor:default; }
-  #grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:10px; padding:14px 16px 40px; }
-  .card { position:relative; background:var(--panel); border:2px solid var(--line); border-radius:8px; overflow:hidden; cursor:pointer; }
-  .card img { width:100%; aspect-ratio:1; object-fit:contain; background:#000; display:block; }
-  .card.rej { border-color:var(--bad); }
-  .card.rej img { opacity:.35; }
-  .card.rej::after { content:"✕ reject"; position:absolute; top:6px; left:6px; background:var(--bad); color:#fff;
-                     font-weight:700; font-size:12px; padding:2px 7px; border-radius:5px; }
-  .meta { padding:6px 8px; font-size:12px; }
-  .meta .why { color:var(--bad); }
-  .meta .name { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .bar { height:3px; background:linear-gradient(90deg, var(--bad) var(--p), transparent var(--p)); }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 var(--sans); text-transform:lowercase; }
+  header { position:sticky; top:0; z-index:2; background:rgba(11,11,11,.96); border-bottom:1px solid var(--line);
+           padding:14px 24px; display:flex; flex-wrap:wrap; gap:8px 28px; align-items:baseline; }
+  .n { font-weight:300; font-size:24px; }
+  .n small { font-size:13px; color:var(--muted); margin-left:6px; }
+  nav { display:flex; gap:18px; margin-left:auto; align-items:baseline; flex-wrap:wrap; }
+  button { background:none; border:0; padding:4px 0; color:var(--muted); font:14px var(--sans); cursor:pointer; text-transform:lowercase; }
+  button:hover:not(:disabled) { color:var(--text); }
+  button.on { color:var(--text); text-decoration:underline; text-underline-offset:4px; }
+  button.go { color:var(--text); border:1px solid var(--text); padding:6px 14px; }
+  button.go:hover:not(:disabled) { background:var(--text); color:var(--bg); }
+  button:disabled { opacity:.35; cursor:default; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; padding:16px 24px 48px; }
+  .card { position:relative; cursor:pointer; background:#000; outline:1px solid transparent; }
+  .card img { width:100%; aspect-ratio:1; object-fit:contain; display:block; }
+  .card .bar { position:absolute; left:0; bottom:0; height:2px; background:var(--muted); }
+  .card.rej { outline:1px solid var(--text); }
+  .card.rej img { opacity:.25; }
+  .card.rej::after { content:"×"; position:absolute; top:2px; right:8px; font-size:20px; color:var(--text); }
+  @media (max-width:600px) { header, #grid { padding-left:16px; padding-right:16px; }
+                             #grid { grid-template-columns:repeat(auto-fill, minmax(100px, 1fr)); } }
 </style></head><body>
 <header>
-  <h1>Photo review</h1>
-  <span class="muted" id="count"></span>
-  <button id="f-all" class="on">All</button>
-  <button id="f-rej">Marked</button>
-  <button id="f-keep">Kept</button>
-  <span class="muted">Click a photo to mark/unmark · Shift+click to open it full size · red bar = how suspicious it looks</span>
-  <button id="move" class="go" disabled>Move marked out</button>
+  <span class="n" id="total">–<small>photos</small></span>
+  <span class="n" id="marked">–<small>marked</small></span>
+  <nav>
+    <button id="f-all" class="on">all</button>
+    <button id="f-rej">marked</button>
+    <button id="f-keep">kept</button>
+    <button id="move" class="go" disabled>move</button>
+  </nav>
 </header>
 <div id="grid"></div>
 <script>
 let items = [], filter = "all";
 const grid = document.getElementById("grid");
 async function load() {
-  grid.innerHTML = '<p class="muted">Analysing photos…</p>';
   items = await (await fetch("/api/list")).json();
   render();
 }
@@ -170,8 +172,7 @@ function render() {
     const c = document.createElement("div");
     c.className = "card" + (it.reject ? " rej" : "");
     c.innerHTML = `<img loading="lazy" src="/img?f=${encodeURIComponent(it.f)}&s=320" alt="">
-      <div class="bar" style="--p:${Math.round(100 * it.score)}%"></div>
-      <div class="meta"><div class="why">${it.reasons.join(" · ")}</div><div class="name" title="${it.f}">${it.f}</div></div>`;
+      <div class="bar" style="width:${Math.round(100 * it.score)}%"></div>`;
     c.onclick = e => {
       if (e.shiftKey) { window.open(`/img?f=${encodeURIComponent(it.f)}&s=0`); return; }
       it.reject = !it.reject; c.classList.toggle("rej", it.reject); count();
@@ -182,20 +183,20 @@ function render() {
 }
 function count() {
   const n = items.filter(i => i.reject).length;
-  document.getElementById("count").textContent = `${items.length} photos · ${n} marked`;
-  const b = document.getElementById("move"); b.disabled = !n; b.textContent = `Move ${n} marked out`;
+  document.getElementById("total").firstChild.nodeValue = items.length;
+  document.getElementById("marked").firstChild.nodeValue = n;
+  document.getElementById("move").disabled = !n;
 }
 for (const [id, f] of [["f-all", "all"], ["f-rej", "rej"], ["f-keep", "keep"]])
   document.getElementById(id).onclick = e => {
-    filter = f; document.querySelectorAll("header button[id^=f-]").forEach(b => b.classList.toggle("on", b === e.target)); render();
+    filter = f; document.querySelectorAll("nav button[id^=f-]").forEach(b => b.classList.toggle("on", b === e.target)); render();
   };
 document.getElementById("move").onclick = async () => {
   const files = items.filter(i => i.reject).map(i => i.f);
-  if (!confirm(`Move ${files.length} photos to the rejected folder?`)) return;
+  if (!confirm(`move ${files.length}?`)) return;
   const r = await (await fetch("/api/move", { method: "POST", body: JSON.stringify({ files }) })).json();
   if (r.error) { alert(r.error); return; }
   items = items.filter(i => !i.reject); render();
-  alert(`Moved ${r.moved} photos to ${r.to}`);
 };
 load();
 </script></body></html>"""
